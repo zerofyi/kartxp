@@ -1,239 +1,138 @@
 import { Head } from '@inertiajs/react';
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import JsBarcode from 'jsbarcode';
 
-interface ProductVariant {
-    id: number;
-    variant_name: string;
-    sku: string;
-    selling_price: number;
-    mrp: number;
-    product: {
-        name: string;
-    };
-}
+interface ProductVariant { id: number; variant_name: string; sku: string; selling_price: number; mrp: number; product: { name: string; }; }
+interface Props { variant: ProductVariant; barcode: string; qty: number; copies: number; size: string; showName: boolean; showPrice: boolean; showSku: boolean; showMRP: boolean; }
 
-interface Props {
-    variant: ProductVariant;
-    barcode: string;
-    qty: number;
-    copies: number;
-    size: string;
-    showName: boolean;
-    showPrice: boolean;
-    showSku: boolean;
-    showMRP: boolean;
-}
+export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, copies, size, showName, showPrice, showSku, showMRP }: Props) {
 
-export default function BarcodeLabelPrint({
-    variant,
-    barcode,
-    qty,
-    copies,
-    size,
-    showName,
-    showPrice,
-    showSku,
-    showMRP,
-}: Props) {
     useEffect(() => {
-        // Generate all barcodes
         const totalLabels = qty * copies;
         for (let i = 0; i < totalLabels; i++) {
             try {
-                JsBarcode(`#barcode-${i}`, barcode, {
+                JsBarcode(`#b-node-${i}`, barcode, {
                     format: 'CODE128',
-                    width: 2,
-                    height: 40,
+                    width: size === '30x20' ? 1.5 : 2,
+                    height: size === '30x20' ? 25 : size === '60x40' ? 55 : 38,
                     displayValue: true,
-                    fontSize: 12,
+                    fontSize: size === '30x20' ? 9 : 11,
                     margin: 0,
+                    textMargin: 3
                 });
             } catch (e) {
-                console.error('Barcode generation error:', e);
+                console.error('Barcode parsing compilation fault node error context:', e);
             }
         }
 
-        // Auto-print after generation
-        const timer = setTimeout(() => {
+        const triggerTimer = setTimeout(() => {
             window.print();
-        }, 500);
+            window.close();
+        }, 600);
 
-        return () => clearTimeout(timer);
-    }, [barcode, qty, copies]);
+        return () => clearTimeout(triggerTimer);
+    }, [barcode, qty, copies, size]);
 
-    // Get size dimensions
-    const getSizeDimensions = () => {
-        switch (size) {
-            case '40x30':
-                return { width: '40mm', height: '30mm', fontSize: '8px', barcodeHeight: 30 };
-            case '50x30':
-                return { width: '50mm', height: '30mm', fontSize: '9px', barcodeHeight: 35 };
-            case '60x40':
-                return { width: '60mm', height: '40mm', fontSize: '10px', barcodeHeight: 40 };
-            case '30x20':
-                return { width: '30mm', height: '20mm', fontSize: '7px', barcodeHeight: 25 };
-            default:
-                return { width: '40mm', height: '30mm', fontSize: '8px', barcodeHeight: 30 };
-        }
-    };
-
-    const dimensions = getSizeDimensions();
     const totalLabels = qty * copies;
+    const itemsIterable = Array.from({ length: totalLabels }, (_, i) => i);
 
-    // Create array of labels
-    const labels = Array.from({ length: totalLabels }, (_, i) => i);
+    // Precise page mapping configurations matched identically against thermal parameters to ensure clean cutting lines
+    const sizeMap: Record<string, { w: string; h: string; pad: string; font: string }> = {
+        '40x30': { w: '40mm', h: '30mm', pad: '2mm', font: '9px' },
+        '50x30': { w: '50mm', h: '30mm', pad: '2.5mm', font: '10px' },
+        '60x40': { w: '60mm', h: '40mm', pad: '3mm', font: '11px' },
+        '30x20': { w: '30mm', h: '20mm', pad: '1.5mm', font: '8px' },
+    };
+    const currentSize = sizeMap[size] || sizeMap['40x30'];
 
     return (
         <>
-            <Head title={`Print Barcode Labels - ${barcode}`} />
+            <Head title={`Thermal Print Preview Target Source — ${barcode}`} />
 
-            <div className="bg-white p-2">
-                <div className="grid gap-2" style={{
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(40mm, 1fr))',
-                }}>
-                    {labels.map((index) => (
-                        <div
-                            key={index}
-                            className="barcode-label"
-                            style={{
-                                width: dimensions.width,
-                                height: dimensions.height,
-                                border: '1px dashed #ccc',
-                                padding: '2mm',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                pageBreakInside: 'avoid',
-                                boxSizing: 'border-box',
-                                fontSize: dimensions.fontSize,
-                            }}
-                        >
-                            {/* Product Name */}
-                            {showName && (
-                                <div
-                                    style={{
-                                        fontSize: dimensions.fontSize,
-                                        fontWeight: 'bold',
-                                        textAlign: 'center',
-                                        marginBottom: '1mm',
-                                        lineHeight: '1.2',
-                                        maxHeight: '10mm',
-                                        overflow: 'hidden',
-                                        width: '100%',
-                                    }}
-                                >
-                                    {variant.product.name}
-                                </div>
-                            )}
-
-                            {/* Variant Name */}
-                            {showName && variant.variant_name && (
-                                <div
-                                    style={{
-                                        fontSize: `calc(${dimensions.fontSize} - 1px)`,
-                                        textAlign: 'center',
-                                        marginBottom: '1mm',
-                                        color: '#666',
-                                    }}
-                                >
-                                    {variant.variant_name}
-                                </div>
-                            )}
-
-                            {/* Barcode */}
-                            <svg
-                                id={`barcode-${index}`}
-                                style={{
-                                    maxWidth: '100%',
-                                    height: `${dimensions.barcodeHeight}px`,
-                                    marginBottom: '1mm',
-                                }}
-                            ></svg>
-
-                            {/* Price Section */}
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    gap: '3mm',
-                                    justifyContent: 'center',
-                                    alignItems: 'center',
-                                    width: '100%',
-                                    marginTop: '1mm',
-                                }}
-                            >
-                                {showPrice && (
-                                    <div
-                                        style={{
-                                            fontSize: dimensions.fontSize,
-                                            fontWeight: 'bold',
-                                        }}
-                                    >
-                                        ₹{variant.selling_price}
-                                    </div>
-                                )}
-
-                                {showMRP && (
-                                    <div
-                                        style={{
-                                            fontSize: `calc(${dimensions.fontSize} - 1px)`,
-                                            color: '#666',
-                                        }}
-                                    >
-                                        MRP: ₹{variant.mrp}
-                                    </div>
-                                )}
+            <div className="print-canvas">
+                {itemsIterable.map((idx) => (
+                    <div key={idx} className="sticker-sheet" style={{
+                        width: currentSize.w,
+                        height: currentSize.h,
+                        padding: currentSize.pad,
+                        boxSizing: 'border-box',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        overflow: 'hidden',
+                        textAlign: 'center',
+                        background: '#fff'
+                    }}>
+                        {/* Title Flag String */}
+                        {showName && (
+                            <div style={{
+                                fontSize: currentSize.font,
+                                fontWeight: 'bold',
+                                whiteSpace: 'nowrap',
+                                textOverflow: 'ellipsis',
+                                overflow: 'hidden',
+                                width: '100%',
+                                marginBottom: '2px',
+                                textTransform: 'uppercase',
+                                color: '#000'
+                            }}>
+                                {variant.product.name}
                             </div>
+                        )}
 
-                            {/* SKU */}
-                            {showSku && (
-                                <div
-                                    style={{
-                                        fontSize: `calc(${dimensions.fontSize} - 1px)`,
-                                        color: '#666',
-                                        marginTop: '1mm',
-                                        fontFamily: 'monospace',
-                                    }}
-                                >
-                                    SKU: {variant.sku}
-                                </div>
-                            )}
+                        {/* Barcode Render Svg Container Target Node */}
+                        <svg id={`b-node-${idx}`} style={{ maxWidth: '100%', display: 'block', margin: '0 auto' }} />
+
+                        {/* Pricing and Attributes Sub-Bands */}
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            gap: '8px',
+                            marginTop: '2px',
+                            fontSize: size === '30x20' ? '8px' : '10px',
+                            fontWeight: 'bold',
+                            color: '#000',
+                            width: '100%'
+                        }}>
+                            {showPrice && <div>₹{variant.selling_price.toFixed(2)}</div>}
+                            {showMRP && <div style={{ textDecoration: 'line-through', fontWeight: 'normal', color: '#555' }}>M:₹{variant.mrp.toFixed(2)}</div>}
+                            {showSku && <div style={{ fontFamily: 'monospace', fontWeight: 'normal' }}>{variant.sku}</div>}
                         </div>
-                    ))}
-                </div>
+                    </div>
+                ))}
             </div>
 
-            {/* Print Styles */}
-            <style>{`
+            {/* Injected Strict Thermal CSS Layout Rule Bounds Blocks */}
+            <style dangerouslySetInnerHTML={{ __html: `
+                html, body {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    background: #ffffff;
+                }
+                .print-canvas {
+                    display: block;
+                    width: ${currentSize.w};
+                }
+                .sticker-sheet {
+                    page-break-inside: avoid !important;
+                    page-break-after: always !important;
+                }
+                @page {
+                    size: ${currentSize.w} ${currentSize.h};
+                    margin: 0 !important;
+                }
                 @media print {
-                    body {
-                        margin: 0;
-                        padding: 0;
+                    html, body {
+                        width: ${currentSize.w};
+                        height: ${currentSize.h};
                     }
-                    @page {
-                        size: auto;
-                        margin: 5mm;
-                    }
-                    .barcode-label {
-                        border: 1px solid #000 !important;
-                        page-break-inside: avoid;
-                    }
-                    * {
-                        print-color-adjust: exact;
-                        -webkit-print-color-adjust: exact;
+                    .sticker-sheet {
+                        display: flex !important;
                     }
                 }
-
-                @media screen {
-                    body {
-                        background: #f0f0f0;
-                    }
-                }
-            `}</style>
-
-            {/* JsBarcode CDN */}
-            <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+            `}} />
         </>
     );
 }

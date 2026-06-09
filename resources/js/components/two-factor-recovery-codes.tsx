@@ -1,5 +1,5 @@
 import { Form } from '@inertiajs/react';
-import { Eye, EyeOff, LockKeyhole, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, LockKeyhole, RefreshCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -94,7 +94,7 @@ export default function TwoFactorRecoveryCodes({
                                     disabled={processing}
                                     aria-describedby="regenerate-warning"
                                 >
-                                    <RefreshCw /> Regenerate Codes
+                                    <RefreshCcw /> Regenerate Codes
                                 </Button>
                             )}
                         </Form>

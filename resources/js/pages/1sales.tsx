@@ -113,7 +113,7 @@ const Sales: React.FC = () => {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {[1, 2, 3].map((i) => (
+                                {[1, 2, 3]?.map((i) => (
                                     <TableRow
                                         key={i}
                                         className="hover:bg-emerald-50"
@@ -216,7 +216,7 @@ const Sales: React.FC = () => {
                         </Select>
                     </div>
                     <div className="flex-1 space-y-2 overflow-auto p-2">
-                        {Array.from({ length: 8 }).map((_, i) => (
+                        {Array.from({ length: 8 })?.map((_, i) => (
                             <Button
                                 key={i}
                                 variant={i === 0 ? 'default' : 'outline'}
@@ -251,7 +251,7 @@ const Sales: React.FC = () => {
 
                     <div className="flex-1 overflow-auto p-4">
                         <div className="grid grid-cols-4 gap-3 lg:grid-cols-6">
-                            {Array.from({ length: 24 }).map((_, i) => (
+                            {Array.from({ length: 24 })?.map((_, i) => (
                                 <Card
                                     key={i}
                                     className="cursor-pointer hover:border-emerald-600"

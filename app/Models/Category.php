@@ -2,55 +2,78 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Category extends Model
 {
-    protected $fillable = ['name', 'parent_id', 'sort_order', 'status'];
+    protected $fillable = [
+        'name',
+        'slug',
+        'parent_id',
+        'sort_order',
+        'status',
+        'image_path',
+        'icon_path',
+        'warehouse_id',
+    ];
 
-    // Get the parent category
+    protected $casts = [
+        'status'     => 'boolean',
+        'sort_order' => 'integer',
+    ];
+
+    // -----------------------------------------------------------------------
+    // Route model binding
+    // -----------------------------------------------------------------------
+
+    public function getRouteKeyName(): string
+    {
+        return 'slug';
+    }
+
+    // -----------------------------------------------------------------------
+    // Relationships
+    // -----------------------------------------------------------------------
+
     public function parent(): BelongsTo
     {
         return $this->belongsTo(Category::class, 'parent_id');
     }
 
-    // Get subcategories
     public function children(): HasMany
     {
         return $this->hasMany(Category::class, 'parent_id')->orderBy('sort_order');
     }
 
-    /**
-     * Get all descendants recursively.
-     */
     public function descendants(): HasMany
     {
         return $this->children()->with('descendants');
     }
 
-    /**
-     * Scope a query to only include active categories.
-     */
-    public function scopeActive($query)
+    public function warehouse(): BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class);
+    }
+
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+
+    // -----------------------------------------------------------------------
+    // Scopes
+    // -----------------------------------------------------------------------
+
+    public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', true);
     }
 
-    /**
-     * Scope a query to only include parent categories.
-     */
-    public function scopeParents($query)
+    public function scopeParents(Builder $query): Builder
     {
         return $query->whereNull('parent_id');
     }
-
-    /**
-     * Get products in this category (uncomment when you have products table)
-     */
-    // public function products(): HasMany
-    // {
-    //     return $this->hasMany(Product::class);
-    // }
 }

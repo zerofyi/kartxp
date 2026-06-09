@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Brand;
+use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
@@ -11,54 +12,73 @@ use Inertia\Inertia;
 
 class BrandController extends Controller
 {
-    /**
-     * Display brand list
-     */
-    public function index()
-    {
-        $brands = Brand::latest()->get()->map(fn ($brand) => [
-            'id' => $brand->id,
-            'name' => $brand->name,
-            'description' => $brand->description,
-            'logo_url' => $brand->logo_path
-                ? asset('storage/' . $brand->logo_path)
-                : null,
-        ]);
+    private const LOGO_FOLDER = 'Brand';
+    private const PER_PAGE = 10;
 
-        return Inertia::render('warehouse/Brand', [
-            'brands' => $brands
+    public function __construct(protected ImageUploadService $imageUploadService) {}
+
+    /**
+     * Display paginated brand list.
+     */
+    public function index(Request $request)
+    {
+        $search = $request->string('search')->trim();
+
+        $brands = Brand::query()
+            ->when($search, fn ($q) => $q->where('name', 'like', "%{$search}%"))
+            ->latest()
+            ->paginate(self::PER_PAGE)
+            ->withQueryString()
+            ->through(fn ($brand) => [
+                'id'          => $brand->id,
+                'name'        => $brand->name,
+                'slug'        => $brand->slug,
+                'description' => $brand->description,
+                'logo_url'    => $brand->logo_path
+                    ? Storage::disk('public_html')->url($brand->logo_path)
+                    : null,
+            ]);
+
+        return Inertia::render('Warehouse/Brand', [
+            'brands' => $brands,
+            'filters' => ['search' => $search],
         ]);
     }
 
     /**
-     * Store new brand
+     * Store a new brand.
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255', 'unique:brands,name'],
-            'description' => ['nullable', 'string'],
-            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'name'        => ['required', 'string', 'max:255', 'unique:brands,name'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'logo'        => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ]);
 
         DB::beginTransaction();
 
         try {
-            $slug = Str::slug($validated['name']);
+            $slug     = Str::slug($validated['name']);
             $logoPath = null;
 
             if ($request->hasFile('logo')) {
-                $logoPath = $this->uploadBrandLogo($request->file('logo'), $slug);
+                $logoPath = $this->imageUploadService->upload(
+                    file:   $request->file('logo'),
+                    slug:   $slug,
+                    folder: self::LOGO_FOLDER,
+                );
 
-                if (!$logoPath) {
-                    throw new \Exception('Logo upload failed.');
+                if (! $logoPath) {
+                    throw new \RuntimeException('Logo upload failed.');
                 }
             }
 
             Brand::create([
-                'name' => $validated['name'],
+                'name'        => $validated['name'],
+                'slug'        => $slug,
                 'description' => $validated['description'] ?? null,
-                'logo_path' => $logoPath,
+                'logo_path'   => $logoPath,
             ]);
 
             DB::commit();
@@ -67,48 +87,51 @@ class BrandController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            logger()->error('Brand store failed: ' . $e->getMessage());
+            $this->cleanupOrphanedLogo($logoPath ?? null);
+            logger()->error('Brand store failed', ['error' => $e->getMessage()]);
 
             return redirect()->back()->withErrors([
-                'error' => 'Something went wrong while creating brand.'
+                'error' => 'Something went wrong while creating the brand.',
             ]);
         }
     }
 
     /**
-     * Update brand
+     * Update an existing brand.
      */
     public function update(Request $request, Brand $brand)
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255', 'unique:brands,name,' . $brand->id],
-            'description' => ['nullable', 'string'],
-            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'name'        => ['required', 'string', 'max:255', 'unique:brands,name,' . $brand->id],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'logo'        => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ]);
 
         DB::beginTransaction();
 
+        $newLogoPath = null;
+
         try {
             $slug = Str::slug($validated['name']);
 
-            // If new logo uploaded
             if ($request->hasFile('logo')) {
+                $newLogoPath = $this->imageUploadService->upload(
+                    file:   $request->file('logo'),
+                    slug:   $slug,
+                    folder: self::LOGO_FOLDER,
+                );
 
-                // Delete old logo if exists
-                if ($brand->logo_path && Storage::disk('public_html')->exists($brand->logo_path)) {
-                    Storage::disk('public_html')->delete($brand->logo_path);
+                if (! $newLogoPath) {
+                    throw new \RuntimeException('Logo upload failed.');
                 }
 
-                $newLogoPath = $this->uploadBrandLogo($request->file('logo'), $slug);
-
-                if (!$newLogoPath) {
-                    throw new \Exception('Logo upload failed.');
-                }
+                $this->deleteLogoIfExists($brand->logo_path);
 
                 $brand->logo_path = $newLogoPath;
             }
 
-            $brand->name = $validated['name'];
+            $brand->name        = $validated['name'];
+            $brand->slug        = $slug;
             $brand->description = $validated['description'] ?? null;
             $brand->save();
 
@@ -118,29 +141,33 @@ class BrandController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            logger()->error('Brand update failed: ' . $e->getMessage());
+            $this->cleanupOrphanedLogo($newLogoPath);
+            logger()->error('Brand update failed', ['brand_id' => $brand->id, 'error' => $e->getMessage()]);
 
             return redirect()->back()->withErrors([
-                'error' => 'Something went wrong while updating brand.'
+                'error' => 'Something went wrong while updating the brand.',
             ]);
         }
     }
 
     /**
-     * Upload Brand Logo
+     * Delete a logo from storage if it exists.
      */
-    protected function uploadBrandLogo($file, $slug)
+    private function deleteLogoIfExists(?string $path): void
     {
-        try {
-            $extension = $file->getClientOriginalExtension();
-            $randomString = Str::random(6);
-            $fileName = $slug . '-' . $randomString . '.' . $extension;
+        if ($path && Storage::disk('public_html')->exists($path)) {
+            Storage::disk('public_html')->delete($path);
+        }
+    }
 
-            return $file->storeAs('Brand', $fileName, 'public_html');
-
-        } catch (\Exception $e) {
-            logger()->error('Brand logo upload failed: ' . $e->getMessage());
-            return false;
+    /**
+     * Clean up a newly uploaded logo if the transaction failed.
+     * Prevents orphaned files on a DB rollback.
+     */
+    private function cleanupOrphanedLogo(?string $path): void
+    {
+        if ($path) {
+            $this->deleteLogoIfExists($path);
         }
     }
 }

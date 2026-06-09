@@ -8,16 +8,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class JournalEntry extends Model
 {
-    protected $fillable = [
-        'date',
-        'reference_type',
-        'reference_id',
-        'description',
-        'created_by',
-    ];
+    protected $fillable = ['user_id', 'date', 'reference_type', 'reference_id', 'description'];
 
     protected $casts = [
-        'date' => 'date',
+        'date' => 'date:Y-m-d',
     ];
 
     public function lines(): HasMany
@@ -25,8 +19,8 @@ class JournalEntry extends Model
         return $this->hasMany(JournalLine::class);
     }
 
-    public function creator(): BelongsTo
+    public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'created_by');
+        return $this->belongsTo(User::class, 'user_id');
     }
 }

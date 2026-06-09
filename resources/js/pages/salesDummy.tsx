@@ -432,7 +432,7 @@ const Sales = () => {
         const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
         const matchesSearch = searchQuery === '' ||
             p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.barcode.includes(searchQuery);
+            p.barcode?.includes(searchQuery);
 
         const matchesPrice = (!priceFilter.min || p.price >= Number(priceFilter.min)) &&
             (!priceFilter.max || p.price <= Number(priceFilter.max));

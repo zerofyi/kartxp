@@ -447,7 +447,7 @@ const POS = ({ products = [], categories = [], warehouse, customers = [] }: Prop
         const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
         const matchesSearch = searchQuery === '' ||
             p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.barcode.includes(searchQuery) ||
+            p.barcode?.includes(searchQuery) ||
             p.sku.includes(searchQuery);
 
         const currentPrice = saleType === 'retail' ? p.selling_price : p.min_selling_price;

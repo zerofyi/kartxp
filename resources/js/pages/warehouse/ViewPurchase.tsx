@@ -1,13 +1,9 @@
 import { Head, router } from '@inertiajs/react';
-import React from 'react';
-import { ArrowLeft, Edit2, FileText, Printer } from 'lucide-react';
+import { ArrowLeft, Edit2, Printer } from 'lucide-react';
 
-import AppLayout from '@/layouts/app-layout';
-import { dashboard } from '@/routes';
-import type { BreadcrumbItem } from '@/types';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
     Table,
     TableBody,
@@ -17,6 +13,13 @@ import {
     TableRow,
 } from '@/components/ui/table';
 
+import AppLayout from '@/layouts/app-layout';
+import { dashboard } from '@/routes';
+import type { BreadcrumbItem } from '@/types';
+
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
 type Vendor = {
     id: number;
     name: string;
@@ -45,6 +48,11 @@ type PurchaseItem = {
     tax_category?: TaxCategory;
     batch_no: string;
     expiry_date?: string;
+    // Server-computed per-item tax breakdown (add these columns to the API response
+    // if you want to avoid re-computing on the client)
+    item_subtotal?: number;
+    item_tax?: number;
+    item_total?: number;
 };
 
 type Purchase = {
@@ -59,7 +67,6 @@ type Purchase = {
     total_amount: number;
     status: 'draft' | 'confirmed';
     items?: PurchaseItem[];
-    created_by?: number;
     created_at: string;
 };
 
@@ -67,37 +74,65 @@ type Props = {
     purchase: Purchase;
 };
 
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+const INR = (n: number) =>
+    new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+const localeDate = (dateStr: string) =>
+    new Date(dateStr).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+
+/**
+ * Derive per-row subtotal/tax/total from the tax category.
+ * The server stores the aggregate correctly; this is display-only.
+ */
+function itemBreakdown(item: PurchaseItem) {
+    const tc    = item.tax_category;
+    const gross = item.quantity * item.cost_price;
+
+    if (!tc) return { subtotal: gross, tax: 0, total: gross };
+
+    if (tc.type === 'inclusive') {
+        const base = gross / (1 + tc.tax_percent / 100);
+        return { subtotal: base, tax: gross - base, total: gross };
+    }
+
+    const tax = (gross * tc.tax_percent) / 100;
+    return { subtotal: gross, tax, total: gross + tax };
+}
+
+// ─────────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────────
 export default function ViewPurchase({ purchase }: Props) {
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: dashboard().url },
-        { title: 'Purchases', href: '/purchases' },
+        { title: 'Purchases', href: '/warehouse/purchases' },
         { title: purchase.invoice_no, href: '' },
     ];
-
-    const handlePrint = () => {
-        window.print();
-    };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={`Purchase ${purchase.invoice_no}`} />
 
             <div className="flex h-full flex-1 flex-col gap-4 p-4">
+
                 {/* Header Actions */}
                 <Card className="print:hidden">
                     <CardContent className="flex items-center justify-between p-4">
-                        <Button variant="outline" onClick={() => router.get('/purchases')}>
-                            <ArrowLeft className="mr-2 size-4" />
+                        <Button variant="outline" onClick={() => router.get('/warehouse/purchases')}>
+                            <ArrowLeft className="mr-2 size-4" aria-hidden />
                             Back to List
                         </Button>
                         <div className="flex gap-2">
-                            <Button variant="outline" onClick={handlePrint}>
-                                <Printer className="mr-2 size-4" />
+                            <Button variant="outline" onClick={() => window.print()}>
+                                <Printer className="mr-2 size-4" aria-hidden />
                                 Print
                             </Button>
                             {purchase.status === 'draft' && (
-                                <Button onClick={() => router.get(`/purchases/${purchase.id}/edit`)}>
-                                    <Edit2 className="mr-2 size-4" />
+                                <Button onClick={() => router.get(`/warehouse/purchases/${purchase.id}/edit`)}>
+                                    <Edit2 className="mr-2 size-4" aria-hidden />
                                     Edit Purchase
                                 </Button>
                             )}
@@ -113,91 +148,87 @@ export default function ViewPurchase({ purchase }: Props) {
                                 <CardTitle className="text-2xl">Purchase Order</CardTitle>
                                 <CardDescription className="mt-1">Invoice: {purchase.invoice_no}</CardDescription>
                             </div>
-                            <Badge variant={purchase.status === 'confirmed' ? 'default' : 'secondary'} className="text-sm">
-                                {purchase.status.toUpperCase()}
+                            <Badge
+                                variant={purchase.status === 'confirmed' ? 'default' : 'secondary'}
+                                className="text-sm capitalize"
+                            >
+                                {purchase.status}
                             </Badge>
                         </div>
                     </CardHeader>
                     <CardContent>
                         <div className="grid gap-6 md:grid-cols-2">
-                            {/* Vendor Information */}
+                            {/* Vendor */}
                             <div className="space-y-3">
-                                <h3 className="font-semibold text-lg">Vendor Details</h3>
-                                <div className="space-y-2 text-sm">
-                                    <div>
-                                        <span className="text-muted-foreground">Name:</span>
-                                        <span className="ml-2 font-medium">{purchase.vendor?.name}</span>
+                                <h3 className="text-lg font-semibold">Vendor Details</h3>
+                                <dl className="space-y-2 text-sm">
+                                    <div className="flex gap-2">
+                                        <dt className="text-muted-foreground">Name:</dt>
+                                        <dd className="font-medium">{purchase.vendor?.name}</dd>
                                     </div>
-                                    <div>
-                                        <span className="text-muted-foreground">Phone:</span>
-                                        <span className="ml-2 font-medium">{purchase.vendor?.phone}</span>
+                                    <div className="flex gap-2">
+                                        <dt className="text-muted-foreground">Phone:</dt>
+                                        <dd className="font-medium">{purchase.vendor?.phone}</dd>
                                     </div>
                                     {purchase.vendor?.gstin && (
-                                        <div>
-                                            <span className="text-muted-foreground">GSTIN:</span>
-                                            <span className="ml-2 font-medium">{purchase.vendor.gstin}</span>
+                                        <div className="flex gap-2">
+                                            <dt className="text-muted-foreground">GSTIN:</dt>
+                                            <dd className="font-mono font-medium">{purchase.vendor.gstin}</dd>
                                         </div>
                                     )}
                                     {purchase.vendor?.email && (
-                                        <div>
-                                            <span className="text-muted-foreground">Email:</span>
-                                            <span className="ml-2 font-medium">{purchase.vendor.email}</span>
+                                        <div className="flex gap-2">
+                                            <dt className="text-muted-foreground">Email:</dt>
+                                            <dd className="font-medium">{purchase.vendor.email}</dd>
                                         </div>
                                     )}
                                     {purchase.vendor?.address && (
-                                        <div>
-                                            <span className="text-muted-foreground">Address:</span>
-                                            <span className="ml-2 font-medium">{purchase.vendor.address}</span>
+                                        <div className="flex gap-2">
+                                            <dt className="text-muted-foreground">Address:</dt>
+                                            <dd className="font-medium">{purchase.vendor.address}</dd>
                                         </div>
                                     )}
-                                </div>
+                                </dl>
                             </div>
 
-                            {/* Purchase Information */}
+                            {/* Purchase info */}
                             <div className="space-y-3">
-                                <h3 className="font-semibold text-lg">Purchase Details</h3>
-                                <div className="space-y-2 text-sm">
-                                    <div>
-                                        <span className="text-muted-foreground">Invoice No:</span>
-                                        <span className="ml-2 font-medium">{purchase.invoice_no}</span>
+                                <h3 className="text-lg font-semibold">Purchase Details</h3>
+                                <dl className="space-y-2 text-sm">
+                                    <div className="flex gap-2">
+                                        <dt className="text-muted-foreground">Invoice No:</dt>
+                                        <dd className="font-mono font-medium">{purchase.invoice_no}</dd>
                                     </div>
-                                    <div>
-                                        <span className="text-muted-foreground">Purchase Date:</span>
-                                        <span className="ml-2 font-medium">
-                                            {new Date(purchase.purchase_date).toLocaleDateString('en-IN', {
-                                                year: 'numeric',
-                                                month: 'long',
-                                                day: 'numeric',
-                                            })}
-                                        </span>
+                                    <div className="flex gap-2">
+                                        <dt className="text-muted-foreground">Purchase Date:</dt>
+                                        <dd className="font-medium">{localeDate(purchase.purchase_date)}</dd>
                                     </div>
-                                    <div>
-                                        <span className="text-muted-foreground">Created On:</span>
-                                        <span className="ml-2 font-medium">
-                                            {new Date(purchase.created_at).toLocaleDateString('en-IN', {
-                                                year: 'numeric',
-                                                month: 'long',
-                                                day: 'numeric',
-                                            })}
-                                        </span>
+                                    <div className="flex gap-2">
+                                        <dt className="text-muted-foreground">Created On:</dt>
+                                        <dd className="font-medium">{localeDate(purchase.created_at)}</dd>
                                     </div>
-                                    <div>
-                                        <span className="text-muted-foreground">Status:</span>
-                                        <Badge variant={purchase.status === 'confirmed' ? 'default' : 'secondary'} className="ml-2">
-                                            {purchase.status}
-                                        </Badge>
+                                    <div className="flex items-center gap-2">
+                                        <dt className="text-muted-foreground">Status:</dt>
+                                        <dd>
+                                            <Badge
+                                                variant={purchase.status === 'confirmed' ? 'default' : 'secondary'}
+                                                className="capitalize"
+                                            >
+                                                {purchase.status}
+                                            </Badge>
+                                        </dd>
                                     </div>
-                                </div>
+                                </dl>
                             </div>
                         </div>
 
                         {/* Invoice Image */}
                         {purchase.image_path && (
                             <div className="mt-6">
-                                <h3 className="font-semibold text-lg mb-3">Invoice Image</h3>
+                                <h3 className="mb-3 text-lg font-semibold">Invoice Image</h3>
                                 <img
                                     src={`/storage/${purchase.image_path}`}
-                                    alt="Invoice"
+                                    alt={`Invoice ${purchase.invoice_no}`}
                                     className="max-w-md rounded-lg border"
                                 />
                             </div>
@@ -211,18 +242,18 @@ export default function ViewPurchase({ purchase }: Props) {
                         <CardTitle>Purchase Items</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="rounded-md border">
+                        <div className="overflow-x-auto rounded-md border">
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className="w-12.5">#</TableHead>
-                                        <TableHead>Product Name</TableHead>
+                                        <TableHead className="w-10">#</TableHead>
+                                        <TableHead>Product</TableHead>
                                         <TableHead>Batch No</TableHead>
-                                        <TableHead>Expiry Date</TableHead>
+                                        <TableHead>Expiry</TableHead>
                                         <TableHead className="text-right">Qty</TableHead>
-                                        <TableHead className="text-right">Cost Price</TableHead>
+                                        <TableHead className="text-right">Cost</TableHead>
                                         <TableHead className="text-right">MRP</TableHead>
-                                        <TableHead className="text-right">Tax</TableHead>
+                                        <TableHead>Tax</TableHead>
                                         <TableHead className="text-right">Subtotal</TableHead>
                                         <TableHead className="text-right">Tax Amt</TableHead>
                                         <TableHead className="text-right">Total</TableHead>
@@ -230,51 +261,29 @@ export default function ViewPurchase({ purchase }: Props) {
                                 </TableHeader>
                                 <TableBody>
                                     {purchase.items?.map((item, index) => {
-                                        const taxCategory = item.tax_category;
-                                        let itemSubtotal = item.quantity * item.cost_price;
-                                        let itemTax = 0;
-                                        let itemTotal = 0;
-
-                                        if (taxCategory) {
-                                            if (taxCategory.type === 'inclusive') {
-                                                // For inclusive: cost_price includes tax
-                                                const baseAmount = (item.quantity * item.cost_price) / (1 + (taxCategory.tax_percent / 100));
-                                                itemTax = (item.quantity * item.cost_price) - baseAmount;
-                                                itemSubtotal = baseAmount;
-                                                itemTotal = item.quantity * item.cost_price;
-                                            } else {
-                                                // For exclusive: tax added on top
-                                                itemTax = (itemSubtotal * taxCategory.tax_percent) / 100;
-                                                itemTotal = itemSubtotal + itemTax;
-                                            }
-                                        } else {
-                                            itemTotal = itemSubtotal;
-                                        }
-
+                                        const { subtotal, tax, total } = itemBreakdown(item);
+                                        const tc = item.tax_category;
                                         return (
                                             <TableRow key={item.id}>
                                                 <TableCell className="font-medium">{index + 1}</TableCell>
-                                                <TableCell>{item.product_name}</TableCell>
-                                                <TableCell>{item.batch_no}</TableCell>
-                                                <TableCell>
+                                                <TableCell>{item.product_name ?? '—'}</TableCell>
+                                                <TableCell className="font-mono text-sm">{item.batch_no}</TableCell>
+                                                <TableCell className="text-sm">
                                                     {item.expiry_date
-                                                        ? new Date(item.expiry_date).toLocaleDateString()
-                                                        : '-'}
+                                                        ? new Date(item.expiry_date).toLocaleDateString('en-IN')
+                                                        : '—'}
                                                 </TableCell>
                                                 <TableCell className="text-right">{item.quantity}</TableCell>
-                                                <TableCell className="text-right">₹{Number(item.cost_price).toFixed(2)}</TableCell>
-                                                <TableCell className="text-right">₹{Number(item.mrp).toFixed(2)}</TableCell>
-                                                <TableCell className="text-right">
-                                                    {taxCategory ? (
-                                                        <span className="text-xs">
-                                                            {taxCategory.name}<br />
-                                                            ({taxCategory.tax_percent}% {taxCategory.type === 'inclusive' ? 'Inc' : 'Exc'})
-                                                        </span>
-                                                    ) : '-'}
+                                                <TableCell className="text-right">₹{INR(item.cost_price)}</TableCell>
+                                                <TableCell className="text-right">₹{INR(item.mrp)}</TableCell>
+                                                <TableCell className="text-xs text-muted-foreground">
+                                                    {tc ? (
+                                                        <>{tc.name}<br />{tc.tax_percent}% {tc.type === 'inclusive' ? 'Inc' : 'Exc'}</>
+                                                    ) : '—'}
                                                 </TableCell>
-                                                <TableCell className="text-right">₹{Number(itemSubtotal).toFixed(2)}</TableCell>
-                                                <TableCell className="text-right">₹{Number(itemTax).toFixed(2)}</TableCell>
-                                                <TableCell className="text-right font-medium">₹{Number(itemTotal).toFixed(2)}</TableCell>
+                                                <TableCell className="text-right">₹{INR(subtotal)}</TableCell>
+                                                <TableCell className="text-right">₹{INR(tax)}</TableCell>
+                                                <TableCell className="text-right font-medium">₹{INR(total)}</TableCell>
                                             </TableRow>
                                         );
                                     })}
@@ -284,20 +293,20 @@ export default function ViewPurchase({ purchase }: Props) {
 
                         {/* Summary */}
                         <div className="mt-6 flex justify-end">
-                            <div className="w-full max-w-xs space-y-2">
+                            <dl className="w-full max-w-xs space-y-2">
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Subtotal:</span>
-                                    <span className="font-medium">₹{Number(purchase.subtotal).toFixed(2)}</span>
+                                    <dt className="text-muted-foreground">Subtotal:</dt>
+                                    <dd className="font-medium">₹{INR(purchase.subtotal)}</dd>
                                 </div>
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Tax Amount:</span>
-                                    <span className="font-medium">₹{Number(purchase.tax_amount).toFixed(2)}</span>
+                                    <dt className="text-muted-foreground">Tax Amount:</dt>
+                                    <dd className="font-medium">₹{INR(purchase.tax_amount)}</dd>
                                 </div>
                                 <div className="flex justify-between border-t pt-2 text-lg font-semibold">
-                                    <span>Total Amount:</span>
-                                    <span>₹{Number(purchase.total_amount).toFixed(2)}</span>
+                                    <dt>Total Amount:</dt>
+                                    <dd>₹{INR(purchase.total_amount)}</dd>
                                 </div>
-                            </div>
+                            </dl>
                         </div>
                     </CardContent>
                 </Card>

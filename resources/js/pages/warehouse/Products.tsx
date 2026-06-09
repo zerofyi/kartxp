@@ -1,252 +1,238 @@
-import { Head, router } from '@inertiajs/react';
-import React, { useCallback, useState } from 'react';
+import { Head, router } from '@inertiajs/react'
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
-    Search,
-    Plus,
-    Edit2,
-    Zap,
-    X,
-    Save,
-    Trash2,
-    PackagePlus,
+    AlertCircleIcon,
     Barcode as BarcodeIcon,
     ChevronDown,
-    ChevronRight,
-    ImageIcon,
-    UploadIcon,
-    AlertCircleIcon,
-    GripVertical,
-    Star,
     ChevronLeft,
-    ChevronRight as ChevronRightIcon,
-} from 'lucide-react';
+    ChevronRight,
+    Edit2,
+    GripVertical,
+    ImageIcon,
+    Loader2,
+    PackagePlus,
+    Plus,
+    Save,
+    Search,
+    Star,
+    Trash2,
+    UploadIcon,
+    X,
+    Zap,
+} from 'lucide-react'
 
-import AppLayout from '@/layouts/app-layout';
-import warehouse from '@/routes/warehouse';
-import type { BreadcrumbItem } from '@/types';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/components/ui/table';
+import AppLayout from '@/layouts/app-layout'
+import warehouse from '@/routes/warehouse'
+import type { BreadcrumbItem } from '@/types'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Textarea } from '@/components/ui/textarea'
 
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type Category       = { id: number; name: string }
+type Brand          = { id: number; name: string }
+type TaxCategory    = { id: number; name: string; tax_percent: number }
+type Unit           = { id: number; name: string; symbol: string }
+type Attribute      = { id: number; name: string; values: AttributeValue[] }
+type AttributeValue = { id: number; attribute_id: number; value: string }
+
+type Barcode = { id?: number; barcode: string; is_primary: boolean }
+
+type ProductImage = {
+    id: number
+    url: string
+    is_primary: boolean
+    sort_order: number
+    _file?: File
+    _preview?: string
+    _isNew?: boolean
+}
+
+type ProductVariant = {
+    id?: number
+    variant_name: string
+    sku: string
+    unit_id: number | string
+    net_quantity: number | string | null
+    mrp: number | string
+    selling_price: number | string
+    cost_price: number | string
+    min_selling_price: number | string | null
+    status: boolean
+    barcodes?: Barcode[]
+    images?: ProductImage[]
+}
+
+type Product = {
+    id: number
+    slug: string
+    name: string
+    product_code: string
+    description?: string
+    category_id: number
+    brand_id?: number | null
+    tax_category_id: number
+    category?: Category
+    brand?: Brand
+    tax_category?: TaxCategory
+    variants?: ProductVariant[]
+    is_active: boolean
+    is_returnable: boolean
+}
+
+type PaginationLink = { url: string | null; label: string; active: boolean }
+
+type PaginatedProducts = {
+    data: Product[]
+    links: PaginationLink[]
+    current_page: number
+    last_page: number
+    per_page: number
+    total: number
+    from: number | null
+    to: number | null
+}
+
+// ─── Variant form state (frontend-only) ──────────────────────────────────────
+
+type VariantState = {
+    id?: number
+    variant_name: string
+    sku: string
+    unit_id: string
+    net_quantity: string
+    mrp: string
+    selling_price: string
+    cost_price: string
+    min_selling_price: string
+    status: boolean
+    barcodes: Barcode[]
+    attributes: Record<number, number>
+    existingImages: ProductImage[]
+    newImages: ProductImage[]
+    deletedImageIds: number[]
+}
+
+// Quick-add types
+type QuickVariant = {
+    _id: string
+    variant_name: string
+    sku: string
+    unit_id: string
+    net_quantity: string
+    mrp: string
+    selling_price: string
+    cost_price: string
+    min_selling_price: string
+    barcodes: Barcode[]
+}
+type QuickProduct = {
+    _id: string
+    name: string
+    brand_id: string
+    variants: QuickVariant[]
+}
+
+type Props = {
+    products: PaginatedProducts
+    categories: Category[]
+    brands: Brand[]
+    taxCategories: TaxCategory[]
+    units: Unit[]
+    attributes: Attribute[]
+    filters: { search: string; per_page: number }
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: warehouse.dashboard().url },
     { title: 'Products', href: '' },
-];
+]
 
-type Category = { id: number; name: string };
-type Brand = { id: number; name: string };
-type TaxCategory = { id: number; name: string; tax_percent: number };
-type Unit = { id: number; name: string; symbol: string };
-type Attribute = { id: number; name: string; values: AttributeValue[] };
-type AttributeValue = { id: number; attribute_id: number; value: string };
+const MAX_IMAGE_BYTES = 120 * 1024 // 120 KB
 
-type Barcode = { id?: number; barcode: string; is_primary: boolean };
+const emptyVariant = (): VariantState => ({
+    variant_name: '', sku: '', unit_id: '', net_quantity: '',
+    mrp: '', selling_price: '', cost_price: '', min_selling_price: '',
+    status: true,
+    barcodes: [{ barcode: '', is_primary: true }],
+    attributes: {},
+    existingImages: [], newImages: [], deletedImageIds: [],
+})
 
-type ProductImage = {
-    id: number;
-    url: string;
-    is_primary: boolean;
-    sort_order: number;
-    // For new (not-yet-uploaded) images, we store the File locally
-    _file?: File;
-    _preview?: string;
-    _isNew?: boolean;
-};
+// FIX #11: Use crypto.randomUUID() instead of Math.random() to avoid ID collisions
+const newId = () => crypto.randomUUID()
 
-type ProductVariant = {
-    id?: number;
-    variant_name: string;
-    sku: string;
-    unit_id: string | number;
-    net_quantity: string | number;
-    mrp: string | number;
-    selling_price: string | number;
-    cost_price: string | number;
-    min_selling_price: string | number;
-    status: boolean;
-    barcodes?: Barcode[];
-    attributes?: { [key: number]: number };
-    images?: ProductImage[];
-};
+const emptyQuickVariant = (): QuickVariant => ({
+    _id: newId(),
+    variant_name: '', sku: '', unit_id: '', net_quantity: '',
+    mrp: '', selling_price: '', cost_price: '', min_selling_price: '',
+    barcodes: [{ barcode: '', is_primary: true }],
+})
 
-type Product = {
-    id: number;
-    name: string;
-    product_code: string;
-    description?: string;
-    category_id: number;
-    brand_id?: number;
-    tax_category_id: number;
-    category?: Category;
-    brand?: Brand;
-    tax_category?: TaxCategory;
-    variants?: ProductVariant[];
-    is_active: boolean;
-    is_returnable: boolean;
-};
-
-type PaginationLink = { url: string | null; label: string; active: boolean };
-type PaginatedProducts = {
-    data: Product[];
-    links: PaginationLink[];
-    current_page: number;
-    last_page: number;
-    per_page: number;
-    total: number;
-    from: number;
-    to: number;
-};
-
-type QuickProduct = {
-    id: string;
-    name: string;
-    brand_id: string;
-    variants: QuickVariant[];
-};
-
-type QuickVariant = {
-    id: string;
-    variant_name: string;
-    sku: string;
-    unit_id: string;
-    net_quantity: string;
-    mrp: string;
-    selling_price: string;
-    cost_price: string;
-    min_selling_price: string;
-    barcodes: Barcode[];
-};
-
-type Props = {
-    products: PaginatedProducts;
-    categories: Category[];
-    brands: Brand[];
-    taxCategories: TaxCategory[];
-    units: Unit[];
-    attributes: Attribute[];
-    filters: { search: string; per_page: number };
-};
-
-type EditVariant = {
-    id?: number;
-    variant_name: string;
-    sku: string;
-    unit_id: string;
-    net_quantity: string;
-    mrp: string;
-    selling_price: string;
-    cost_price: string;
-    min_selling_price: string;
-    status: boolean;
-    barcodes: Barcode[];
-    attributes: { [key: number]: number };
-    // Existing images (from server)
-    existingImages: ProductImage[];
-    // New images staged locally (not yet uploaded)
-    newImages: ProductImage[];
-    // IDs of existing images the user wants to delete
-    deletedImageIds: number[];
-};
-
-// ─────────────────────────────────────────────
-// Image compression helper (client-side, max 120 KB)
-// ─────────────────────────────────────────────
-const MAX_IMAGE_BYTES = 120 * 1024; // 120 KB
+// ─── Image compression ────────────────────────────────────────────────────────
 
 async function compressImage(file: File): Promise<File> {
     return new Promise((resolve) => {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
+        const img = new Image()
+        const url = URL.createObjectURL(file)
 
         img.onload = () => {
-            URL.revokeObjectURL(url);
+            // FIX #10: Revoke object URL immediately after image loads
+            URL.revokeObjectURL(url)
 
-            const canvas = document.createElement('canvas');
-            let { width, height } = img;
-
-            // Downsample if very large
-            const MAX_DIM = 1200;
+            let { width, height } = img
+            const MAX_DIM = 1200
             if (width > MAX_DIM || height > MAX_DIM) {
-                const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
-                width = Math.round(width * ratio);
-                height = Math.round(height * ratio);
+                const ratio = Math.min(MAX_DIM / width, MAX_DIM / height)
+                width  = Math.round(width * ratio)
+                height = Math.round(height * ratio)
             }
 
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d')!;
-            ctx.drawImage(img, 0, 0, width, height);
+            const canvas = document.createElement('canvas')
+            canvas.width  = width
+            canvas.height = height
+            canvas.getContext('2d')!.drawImage(img, 0, 0, width, height)
 
-            // Binary search for quality that keeps file <= 120 KB
-            let lo = 0.1;
-            let hi = 0.92;
-            let result: Blob | null = null;
+            const tryQ = (q: number): Promise<Blob> =>
+                new Promise((res) => canvas.toBlob((b) => res(b!), 'image/jpeg', q))
 
-            const tryQuality = (q: number): Promise<Blob> =>
-                new Promise((res) =>
-                    canvas.toBlob((b) => res(b!), 'image/jpeg', q),
-                );
+            ;(async () => {
+                let lo = 0.1, hi = 0.92, result: Blob | null = null
+                const maxBlob = await tryQ(hi)
 
-            (async () => {
-                // Quick check: at max quality, is it already small enough?
-                const maxBlob = await tryQuality(hi);
                 if (maxBlob.size <= MAX_IMAGE_BYTES) {
-                    result = maxBlob;
+                    result = maxBlob
                 } else {
-                    // Binary search
                     for (let i = 0; i < 8; i++) {
-                        const mid = (lo + hi) / 2;
-                        const blob = await tryQuality(mid);
-                        if (blob.size <= MAX_IMAGE_BYTES) {
-                            result = blob;
-                            lo = mid;
-                        } else {
-                            hi = mid;
-                        }
+                        const mid  = (lo + hi) / 2
+                        const blob = await tryQ(mid)
+                        if (blob.size <= MAX_IMAGE_BYTES) { result = blob; lo = mid } else { hi = mid }
                     }
-                    // Fallback: use lowest quality if still too big
-                    if (!result) {
-                        result = await tryQuality(lo);
-                    }
+                    if (! result) result = await tryQ(lo)
                 }
 
-                const compressed = new File([result!], file.name.replace(/\.[^.]+$/, '.jpg'), {
-                    type: 'image/jpeg',
-                });
-                resolve(compressed);
-            })();
-        };
+                resolve(new File([result!], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }))
+            })()
+        }
 
-        img.src = url;
-    });
+        img.src = url
+    })
 }
 
-// ─────────────────────────────────────────────
-// VariantImageUploader
-// ─────────────────────────────────────────────
+// ─── VariantImageUploader ─────────────────────────────────────────────────────
+
 function VariantImageUploader({
+    variantIndex,
     existingImages,
     newImages,
     deletedImageIds,
@@ -255,316 +241,538 @@ function VariantImageUploader({
     onNewRemove,
     onReorder,
 }: {
-    existingImages: ProductImage[];
-    newImages: ProductImage[];
-    deletedImageIds: number[];
-    onExistingDelete: (id: number) => void;
-    onNewAdd: (imgs: ProductImage[]) => void;
-    onNewRemove: (idx: number) => void;
-    onReorder: (imgs: ProductImage[]) => void;
+    variantIndex: number
+    existingImages: ProductImage[]
+    newImages: ProductImage[]
+    deletedImageIds: number[]
+    onExistingDelete: (id: number) => void
+    onNewAdd: (imgs: ProductImage[]) => void
+    onNewRemove: (idx: number) => void
+    onReorder: (all: ProductImage[]) => void
 }) {
-    const [isDragging, setIsDragging] = useState(false);
-    const [errors, setErrors] = useState<string[]>([]);
-    const [compressing, setCompressing] = useState(false);
-    const [dragOver, setDragOver] = useState<number | null>(null);
+    const [isDragging, setIsDragging]   = useState(false)
+    const [error, setError]             = useState<string | null>(null)
+    const [compressing, setCompressing] = useState(false)
+    const [dragOver, setDragOver]       = useState<number | null>(null)
+    // FIX #18: Stable ID for the file input (useId is stable across renders)
+    // FIX #11: No Math.random() for IDs
+    const inputId = useId()
 
-    const visibleExisting = existingImages.filter((img) => !deletedImageIds.includes(img.id));
-    const totalCount = visibleExisting.length + newImages.length;
+    const visibleExisting = existingImages.filter((img) => ! deletedImageIds.includes(img.id))
+    const totalCount      = visibleExisting.length + newImages.length
 
-    const processFiles = useCallback(
-        async (files: File[]) => {
-            setErrors([]);
+    // FIX #12: Serialize processing so concurrent async calls can't race past the 4-image limit
+    const processingRef = useRef(false)
 
-            const imageFiles = files.filter((f) => f.type.startsWith('image/'));
-            if (imageFiles.length === 0) {
-                setErrors(['Please select image files (JPEG, PNG, WebP).']);
-                return;
-            }
+    const processFiles = useCallback(async (files: File[]) => {
+        if (processingRef.current) return
+        processingRef.current = true
+        setError(null)
 
-            const canAdd = 4 - totalCount;
-            if (canAdd <= 0) {
-                setErrors(['Maximum 4 images per variant reached.']);
-                return;
-            }
+        try {
+            const imageFiles = files.filter((f) => f.type.startsWith('image/'))
+            if (! imageFiles.length) { setError('Please select image files.'); return }
 
-            const toProcess = imageFiles.slice(0, canAdd);
+            // Re-read totalCount at execution time to handle race
+            const currentTotal = visibleExisting.length + newImages.length
+            const canAdd = 4 - currentTotal
+            if (canAdd <= 0) { setError('Maximum 4 images per variant.'); return }
+
+            const toProcess = imageFiles.slice(0, canAdd)
             if (imageFiles.length > canAdd) {
-                setErrors([`Only ${canAdd} more image(s) can be added (max 4 total).`]);
+                setError(`Only ${canAdd} slot(s) left — extra files ignored.`)
             }
 
-            setCompressing(true);
-            try {
-                const compressed = await Promise.all(toProcess.map(compressImage));
-                const staged: ProductImage[] = compressed.map((file, i) => ({
-                    id: 0, // placeholder
-                    url: '',
-                    is_primary: totalCount + i === 0,
-                    sort_order: totalCount + i,
-                    _file: file,
-                    _preview: URL.createObjectURL(file),
-                    _isNew: true,
-                }));
-                onNewAdd(staged);
-            } finally {
-                setCompressing(false);
-            }
-        },
-        [totalCount, onNewAdd],
-    );
+            setCompressing(true)
+            const compressed = await Promise.all(toProcess.map(compressImage))
 
-    const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files) processFiles(Array.from(e.target.files));
-        e.target.value = '';
-    };
+            onNewAdd(compressed.map((file, i) => ({
+                id: 0,
+                url: '',
+                is_primary: currentTotal + i === 0,
+                sort_order: currentTotal + i,
+                _file: file,
+                // FIX #10: Preview URLs are created here; caller is responsible for revoking on unmount
+                _preview: URL.createObjectURL(file),
+                _isNew: true,
+            })))
+        } finally {
+            setCompressing(false)
+            processingRef.current = false
+        }
+    }, [visibleExisting.length, newImages.length, onNewAdd])
 
-    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        setIsDragging(false);
-        if (e.dataTransfer.files) processFiles(Array.from(e.dataTransfer.files));
-    };
+    // FIX #10: Revoke preview URLs when new images are removed/changed
+    useEffect(() => {
+        return () => {
+            newImages.forEach((img) => {
+                if (img._preview) URL.revokeObjectURL(img._preview)
+            })
+        }
+    }, []) // Only on unmount — intentional
 
-    // Drag-to-reorder among the combined list (existing + new)
-    const allImages: Array<{ type: 'existing'; img: ProductImage } | { type: 'new'; img: ProductImage; idx: number }> = [
+    const allImages = [
         ...visibleExisting.map((img) => ({ type: 'existing' as const, img })),
         ...newImages.map((img, idx) => ({ type: 'new' as const, img, idx })),
-    ];
-
-    const handleItemDragOver = (e: React.DragEvent, order: number) => {
-        e.preventDefault();
-        setDragOver(order);
-    };
+    ].sort((a, b) => a.img.sort_order - b.img.sort_order)
 
     const handleItemDrop = (e: React.DragEvent, targetOrder: number) => {
-        e.preventDefault();
-        setDragOver(null);
-        const srcOrder = Number(e.dataTransfer.getData('sort_order'));
-        if (srcOrder === targetOrder) return;
+        e.preventDefault()
+        setDragOver(null)
+        const srcOrder = Number(e.dataTransfer.getData('sort_order'))
+        if (srcOrder === targetOrder) return
 
-        // Rebuild combined ordered list and swap
-        const sorted = [...allImages].sort(
-            (a, b) => a.img.sort_order - b.img.sort_order,
-        );
-        const srcIdx = sorted.findIndex((x) => x.img.sort_order === srcOrder);
-        const dstIdx = sorted.findIndex((x) => x.img.sort_order === targetOrder);
-        if (srcIdx === -1 || dstIdx === -1) return;
+        const sorted = [...allImages]
+        const srcIdx = sorted.findIndex((x) => x.img.sort_order === srcOrder)
+        const dstIdx = sorted.findIndex((x) => x.img.sort_order === targetOrder)
+        if (srcIdx === -1 || dstIdx === -1) return
 
-        const copy = [...sorted];
-        const [moved] = copy.splice(srcIdx, 1);
-        copy.splice(dstIdx, 0, moved);
+        const copy = [...sorted]
+        const [moved] = copy.splice(srcIdx, 1)
+        copy.splice(dstIdx, 0, moved)
 
-        // Re-assign sort_order and is_primary
-        const reordered = copy.map((x, i) => ({ ...x, img: { ...x.img, sort_order: i, is_primary: i === 0 } }));
-        onReorder(reordered.map((x) => x.img));
-    };
+        onReorder(copy.map((x, i) => ({ ...x.img, sort_order: i, is_primary: i === 0 })))
+    }
 
     return (
         <div className="space-y-3">
-            {/* Drop zone */}
             {totalCount < 4 && (
                 <div
+                    role="region"
+                    aria-label={`Image upload area for variant ${variantIndex + 1}`}
                     className={`relative flex min-h-28 flex-col items-center justify-center rounded-xl border border-dashed p-4 transition-colors ${
                         isDragging ? 'border-primary bg-primary/5' : 'border-input hover:border-primary/50'
                     }`}
-                    onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
-                    onDragLeave={(e) => { e.preventDefault(); if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false); }}
+                    onDragEnter={(e) => { e.preventDefault(); setIsDragging(true) }}
+                    onDragLeave={(e) => {
+                        e.preventDefault()
+                        if (! e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false)
+                    }}
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={handleDrop}
+                    onDrop={(e) => {
+                        e.preventDefault()
+                        setIsDragging(false)
+                        processFiles(Array.from(e.dataTransfer.files))
+                    }}
                 >
+                    {/* FIX #18: aria-label on input, stable htmlFor via useId */}
                     <input
                         type="file"
                         accept="image/jpeg,image/jpg,image/png,image/webp"
                         multiple
                         className="sr-only"
-                        id="img-upload"
-                        onChange={handleFileInput}
+                        id={inputId}
+                        aria-label={`Upload images for variant ${variantIndex + 1}`}
+                        onChange={(e) => {
+                            if (e.target.files) processFiles(Array.from(e.target.files))
+                            e.target.value = ''
+                        }}
                         disabled={compressing}
                     />
-                    <div className="flex size-10 items-center justify-center rounded-full border bg-background">
-                        {compressing ? (
-                            <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                        ) : (
-                            <ImageIcon className="size-4 opacity-60" />
-                        )}
+                    <div className="flex size-9 items-center justify-center rounded-full border bg-background">
+                        {compressing
+                            ? <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+                            : <ImageIcon className="size-3.5 opacity-60" aria-hidden="true" />
+                        }
                     </div>
-                    <p className="mt-2 text-sm font-medium">
-                        {compressing ? 'Compressing images…' : 'Drop images here'}
+                    <p className="mt-2 text-xs font-medium">
+                        {compressing ? 'Compressing…' : 'Drop images here'}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                        JPEG, PNG, WebP · Auto-compressed to ≤120 KB · {4 - totalCount} slot(s) left
+                        JPEG, PNG, WebP · ≤120 KB after compression · {4 - totalCount} slot(s) left
                     </p>
                     <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="mt-3"
-                        onClick={() => document.getElementById('img-upload')?.click()}
+                        className="mt-2"
+                        // FIX #11: Use the stable inputId, not Math.random()
+                        onClick={() => document.getElementById(inputId)?.click()}
                         disabled={compressing}
                     >
-                        <UploadIcon className="mr-2 size-3.5" />
-                        Select Images
+                        <UploadIcon className="mr-1.5 size-3.5" aria-hidden="true" /> Select
                     </Button>
                 </div>
             )}
 
-            {errors.length > 0 && (
-                <div className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
-                    <AlertCircleIcon className="size-3.5 shrink-0" />
-                    <span>{errors[0]}</span>
-                </div>
+            {error && (
+                <p className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
+                    <AlertCircleIcon className="size-3.5 shrink-0" aria-hidden="true" /> {error}
+                </p>
             )}
 
-            {/* Image grid (drag to reorder) */}
             {allImages.length > 0 && (
-                <div className="grid grid-cols-4 gap-2">
-                    {allImages
-                        .sort((a, b) => a.img.sort_order - b.img.sort_order)
-                        .map((item, order) => {
-                            const isExisting = item.type === 'existing';
-                            const src = isExisting ? item.img.url : item.img._preview;
-                            const isPrimary = order === 0;
+                <div className="grid grid-cols-4 gap-2" role="list" aria-label="Product images">
+                    {allImages.map((item, order) => {
+                        const isExisting = item.type === 'existing'
+                        const src        = isExisting ? item.img.url : item.img._preview
+                        const isPrimary  = order === 0
+                        const key        = isExisting
+                            ? `e-${item.img.id}`
+                            : `n-${(item as { type: 'new'; img: ProductImage; idx: number }).idx}`
 
-                            return (
-                                <div
-                                    key={isExisting ? `e-${item.img.id}` : `n-${(item as { type: 'new'; img: ProductImage; idx: number }).idx}`}
-                                    className={`group relative aspect-square overflow-hidden rounded-lg border-2 transition-all ${
-                                        isPrimary ? 'border-primary' : 'border-border'
-                                    } ${dragOver === item.img.sort_order ? 'opacity-50 scale-95' : ''}`}
-                                    draggable
-                                    onDragStart={(e) => {
-                                        e.dataTransfer.setData('sort_order', String(item.img.sort_order));
-                                    }}
-                                    onDragOver={(e) => handleItemDragOver(e, item.img.sort_order)}
-                                    onDragLeave={() => setDragOver(null)}
-                                    onDrop={(e) => handleItemDrop(e, item.img.sort_order)}
-                                >
-                                    <img
-                                        src={src}
-                                        alt={`Image ${order + 1}`}
-                                        className="size-full object-cover"
-                                    />
+                        return (
+                            <div
+                                key={key}
+                                role="listitem"
+                                aria-label={`${isPrimary ? 'Primary image' : `Image ${order + 1}`}${! isExisting ? ' (new, not saved yet)' : ''}`}
+                                className={`group relative aspect-square overflow-hidden rounded-lg border-2 transition-all cursor-grab ${
+                                    isPrimary ? 'border-primary' : 'border-border'
+                                } ${dragOver === item.img.sort_order ? 'opacity-50 scale-95' : ''}`}
+                                draggable
+                                onDragStart={(e) => e.dataTransfer.setData('sort_order', String(item.img.sort_order))}
+                                onDragOver={(e) => { e.preventDefault(); setDragOver(item.img.sort_order) }}
+                                onDragLeave={() => setDragOver(null)}
+                                onDrop={(e) => handleItemDrop(e, item.img.sort_order)}
+                            >
+                                <img src={src} alt={isPrimary ? 'Primary product image' : `Product image ${order + 1}`} className="size-full object-cover" />
 
-                                    {/* Primary badge */}
-                                    {isPrimary && (
-                                        <div className="absolute left-1 top-1">
-                                            <Badge className="gap-1 px-1.5 py-0 text-[10px]">
-                                                <Star className="size-2.5" />
-                                                Primary
-                                            </Badge>
-                                        </div>
-                                    )}
-
-                                    {/* Drag handle */}
-                                    <div className="absolute right-1 top-1 cursor-grab opacity-0 transition-opacity group-hover:opacity-100">
-                                        <div className="rounded bg-black/50 p-0.5">
-                                            <GripVertical className="size-3 text-white" />
-                                        </div>
+                                {isPrimary && (
+                                    <div className="absolute left-1 top-1">
+                                        <Badge className="gap-1 px-1.5 py-0 text-[10px]">
+                                            <Star className="size-2" aria-hidden="true" /> Primary
+                                        </Badge>
                                     </div>
+                                )}
 
-                                    {/* Delete button */}
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            if (isExisting) {
-                                                onExistingDelete(item.img.id);
-                                            } else {
-                                                onNewRemove((item as { type: 'new'; img: ProductImage; idx: number }).idx);
-                                            }
-                                        }}
-                                        className="absolute bottom-1 right-1 flex size-6 items-center justify-center rounded-full bg-destructive/90 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive"
-                                    >
-                                        <X className="size-3" />
-                                    </button>
-
-                                    {/* New indicator */}
-                                    {!isExisting && (
-                                        <div className="absolute bottom-1 left-1">
-                                            <Badge variant="secondary" className="px-1 py-0 text-[10px]">New</Badge>
-                                        </div>
-                                    )}
+                                <div className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true">
+                                    <div className="rounded bg-black/50 p-0.5">
+                                        <GripVertical className="size-3 text-white" />
+                                    </div>
                                 </div>
-                            );
-                        })}
+
+                                <button
+                                    type="button"
+                                    aria-label={`Remove ${isPrimary ? 'primary' : `image ${order + 1}`}`}
+                                    onClick={() => isExisting
+                                        ? onExistingDelete(item.img.id)
+                                        : onNewRemove((item as { type: 'new'; img: ProductImage; idx: number }).idx)
+                                    }
+                                    className="absolute bottom-1 right-1 flex size-6 items-center justify-center rounded-full bg-destructive/90 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive"
+                                >
+                                    <X className="size-3" aria-hidden="true" />
+                                </button>
+
+                                {! isExisting && (
+                                    <div className="absolute bottom-1 left-1">
+                                        <Badge variant="secondary" className="px-1 py-0 text-[10px]">New</Badge>
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    })}
                 </div>
             )}
 
             {allImages.length > 1 && (
                 <p className="text-center text-xs text-muted-foreground">
-                    Drag images to reorder · First image becomes the primary
+                    Drag to reorder · First image becomes primary
                 </p>
             )}
         </div>
-    );
+    )
 }
 
-// ─────────────────────────────────────────────
-// Pagination Component
-// ─────────────────────────────────────────────
-function Pagination({
-    data,
-    onPageChange,
+// ─── VariantForm ──────────────────────────────────────────────────────────────
+// FIX #17: Single source of truth for variant form used in both modal and quick-add
+
+function VariantForm({
+    variant,
+    index,
+    units,
+    attributes,
+    isOnly,
+    onChange,
+    onRemove,
 }: {
-    data: PaginatedProducts;
-    onPageChange: (url: string) => void;
+    variant: VariantState
+    index: number
+    units: Unit[]
+    attributes: Attribute[]
+    isOnly: boolean
+    onChange: (field: keyof VariantState, value: unknown) => void
+    onRemove: () => void
 }) {
-    if (data.last_page <= 1) return null;
+    const [expanded, setExpanded] = useState(index === 0)
+
+    const imageCount =
+        variant.existingImages.filter((x) => ! variant.deletedImageIds.includes(x.id)).length +
+        variant.newImages.length
+
+    const headerId = useId()
 
     return (
-        <div className="flex items-center justify-between border-t px-4 py-3">
-            <p className="text-sm text-muted-foreground">
-                Showing {data.from}–{data.to} of {data.total} products
-            </p>
-            <div className="flex items-center gap-1">
-                {/* Prev */}
-                <Button
-                    variant="outline"
-                    size="icon"
-                    className="size-8"
-                    disabled={data.current_page === 1}
-                    onClick={() => {
-                        const prev = data.links.find((l) => l.label === '&laquo; Previous');
-                        if (prev?.url) onPageChange(prev.url);
-                    }}
-                >
-                    <ChevronLeft className="size-4" />
-                </Button>
-
-                {/* Page numbers */}
-                {data.links
-                    .filter((l) => !l.label.includes('&laquo;') && !l.label.includes('&raquo;'))
-                    .map((link, i) => (
-                        <Button
-                            key={i}
-                            variant={link.active ? 'default' : 'outline'}
-                            size="icon"
-                            className="size-8 text-xs"
-                            disabled={!link.url || link.active}
-                            onClick={() => link.url && onPageChange(link.url)}
-                            dangerouslySetInnerHTML={{ __html: link.label }}
-                        />
-                    ))}
-
-                {/* Next */}
-                <Button
-                    variant="outline"
-                    size="icon"
-                    className="size-8"
-                    disabled={data.current_page === data.last_page}
-                    onClick={() => {
-                        const next = data.links.find((l) => l.label === 'Next &raquo;');
-                        if (next?.url) onPageChange(next.url);
-                    }}
-                >
-                    <ChevronRightIcon className="size-4" />
-                </Button>
+        <Card>
+            <div
+                className="flex cursor-pointer items-center justify-between bg-muted/30 px-4 py-3"
+                onClick={() => setExpanded((v) => ! v)}
+                role="button"
+                aria-expanded={expanded}
+                aria-controls={`variant-content-${headerId}`}
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' || e.key === ' ' ? setExpanded((v) => ! v) : undefined}
+            >
+                <div className="flex items-center gap-2 text-sm font-medium">
+                    <ChevronDown
+                        className={`size-4 transition-transform ${expanded ? '' : '-rotate-90'}`}
+                        aria-hidden="true"
+                    />
+                    Variant {index + 1}
+                    {variant.variant_name && (
+                        <span className="text-muted-foreground">— {variant.variant_name}</span>
+                    )}
+                    {imageCount > 0 && (
+                        <Badge variant="secondary" className="gap-1 text-[11px]">
+                            <ImageIcon className="size-3" aria-hidden="true" /> {imageCount}/4
+                        </Badge>
+                    )}
+                </div>
+                {! isOnly && (
+                    <button
+                        type="button"
+                        aria-label={`Remove variant ${index + 1}`}
+                        onClick={(e) => { e.stopPropagation(); onRemove() }}
+                        className="rounded p-1 text-destructive hover:bg-destructive/10"
+                    >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                    </button>
+                )}
             </div>
-        </div>
-    );
+
+            {expanded && (
+                <CardContent id={`variant-content-${headerId}`} className="space-y-4 p-4">
+                    {/* Core fields */}
+                    <div className="grid gap-3 md:grid-cols-3">
+                        {(
+                            [
+                                { label: 'Variant Name *', field: 'variant_name', placeholder: 'e.g. 1kg' },
+                                { label: 'SKU *',          field: 'sku',          placeholder: 'Unique SKU', mono: true },
+                            ] as { label: string; field: keyof VariantState; placeholder: string; mono?: boolean }[]
+                        ).map(({ label, field, placeholder, mono }) => (
+                            <div key={field} className="space-y-1.5">
+                                <Label htmlFor={`${field}-${headerId}`} className="text-xs">{label}</Label>
+                                <Input
+                                    id={`${field}-${headerId}`}
+                                    value={variant[field] as string}
+                                    onChange={(e) => onChange(field, e.target.value)}
+                                    placeholder={placeholder}
+                                    className={mono ? 'font-mono' : ''}
+                                    aria-required="true"
+                                />
+                            </div>
+                        ))}
+
+                        <div className="space-y-1.5">
+                            <Label htmlFor={`unit-${headerId}`} className="text-xs">Unit *</Label>
+                            <Select value={variant.unit_id} onValueChange={(v) => onChange('unit_id', v)}>
+                                <SelectTrigger id={`unit-${headerId}`} aria-required="true">
+                                    <SelectValue placeholder="Select Unit" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {units.map((u) => (
+                                        <SelectItem key={u.id} value={u.id.toString()}>
+                                            {u.name} ({u.symbol})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {(
+                            [
+                                { label: 'Net Qty',     field: 'net_quantity' },
+                                { label: 'MRP *',       field: 'mrp' },
+                                { label: 'Selling *',   field: 'selling_price' },
+                                { label: 'Cost *',      field: 'cost_price' },
+                                { label: 'Min Selling', field: 'min_selling_price' },
+                            ] as { label: string; field: keyof VariantState }[]
+                        ).map(({ label, field }) => (
+                            <div key={field} className="space-y-1.5">
+                                <Label htmlFor={`${field}-${headerId}`} className="text-xs">{label}</Label>
+                                <Input
+                                    id={`${field}-${headerId}`}
+                                    type="number"
+                                    step="0.01"
+                                    value={variant[field] as string}
+                                    onChange={(e) => onChange(field, e.target.value)}
+                                    placeholder="0.00"
+                                />
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Images */}
+                    <div className="space-y-1.5">
+                        <Label className="flex items-center gap-1.5 text-xs">
+                            <ImageIcon className="size-3.5" aria-hidden="true" /> Images
+                            <span className="font-normal text-muted-foreground">(max 4)</span>
+                        </Label>
+                        <VariantImageUploader
+                            variantIndex={index}
+                            existingImages={variant.existingImages}
+                            newImages={variant.newImages}
+                            deletedImageIds={variant.deletedImageIds}
+                            onExistingDelete={(id) =>
+                                onChange('deletedImageIds', [...variant.deletedImageIds, id])
+                            }
+                            onNewAdd={(imgs) => {
+                                const base =
+                                    variant.existingImages.filter(
+                                        (x) => ! variant.deletedImageIds.includes(x.id),
+                                    ).length + variant.newImages.length
+                                onChange('newImages', [
+                                    ...variant.newImages,
+                                    ...imgs.map((img, j) => ({
+                                        ...img,
+                                        sort_order: base + j,
+                                        is_primary: base + j === 0,
+                                    })),
+                                ])
+                            }}
+                            onNewRemove={(idx) =>
+                                onChange(
+                                    'newImages',
+                                    variant.newImages.filter((_, j) => j !== idx),
+                                )
+                            }
+                            onReorder={(all) => {
+                                const existingIds = new Set(variant.existingImages.map((x) => x.id))
+                                onChange(
+                                    'existingImages',
+                                    all.filter((img) => ! img._isNew && existingIds.has(img.id)),
+                                )
+                                onChange('newImages', all.filter((img) => img._isNew))
+                            }}
+                        />
+                    </div>
+
+                    {/* Barcodes */}
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <Label className="flex items-center gap-1.5 text-xs">
+                                <BarcodeIcon className="size-3.5" aria-hidden="true" /> Barcodes
+                            </Label>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    onChange('barcodes', [
+                                        ...variant.barcodes,
+                                        { barcode: '', is_primary: false },
+                                    ])
+                                }
+                                className="text-xs text-primary hover:underline"
+                                aria-label="Add barcode"
+                            >
+                                + Add Barcode
+                            </button>
+                        </div>
+                        {variant.barcodes.map((bc, bIdx) => (
+                            <div key={bIdx} className="flex items-center gap-2">
+                                <Input
+                                    value={bc.barcode}
+                                    onChange={(e) =>
+                                        onChange(
+                                            'barcodes',
+                                            variant.barcodes.map((b, i) =>
+                                                i === bIdx ? { ...b, barcode: e.target.value } : b,
+                                            ),
+                                        )
+                                    }
+                                    className="flex-1 font-mono text-sm"
+                                    placeholder="Barcode value"
+                                    aria-label={`Barcode ${bIdx + 1}`}
+                                />
+                                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                    <Checkbox
+                                        checked={bc.is_primary}
+                                        onCheckedChange={(c) =>
+                                            onChange(
+                                                'barcodes',
+                                                variant.barcodes.map((b, i) => ({
+                                                    ...b,
+                                                    is_primary: c ? i === bIdx : false,
+                                                })),
+                                            )
+                                        }
+                                        aria-label={`Set barcode ${bIdx + 1} as primary`}
+                                    />
+                                    Primary
+                                </label>
+                                {variant.barcodes.length > 1 && (
+                                    <button
+                                        type="button"
+                                        aria-label={`Remove barcode ${bIdx + 1}`}
+                                        onClick={() =>
+                                            onChange(
+                                                'barcodes',
+                                                variant.barcodes.filter((_, i) => i !== bIdx),
+                                            )
+                                        }
+                                        className="text-muted-foreground hover:text-destructive"
+                                    >
+                                        <X className="size-4" aria-hidden="true" />
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Attributes */}
+                    {attributes.length > 0 && (
+                        <div className="space-y-2">
+                            <Label className="text-xs">Attributes</Label>
+                            <div className="grid gap-2 md:grid-cols-2">
+                                {attributes.map((attr) => (
+                                    <div key={attr.id} className="space-y-1">
+                                        <Label
+                                            htmlFor={`attr-${attr.id}-${headerId}`}
+                                            className="text-xs text-muted-foreground"
+                                        >
+                                            {attr.name}
+                                        </Label>
+                                        <Select
+                                            value={variant.attributes[attr.id]?.toString() ?? ''}
+                                            onValueChange={(v) =>
+                                                onChange('attributes', {
+                                                    ...variant.attributes,
+                                                    [attr.id]: Number(v),
+                                                })
+                                            }
+                                        >
+                                            <SelectTrigger id={`attr-${attr.id}-${headerId}`}>
+                                                <SelectValue placeholder={`Select ${attr.name}`} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {attr.values.map((val) => (
+                                                    <SelectItem key={val.id} value={val.id.toString()}>
+                                                        {val.value}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <label className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                            checked={variant.status}
+                            onCheckedChange={(c) => onChange('status', !! c)}
+                            aria-label="Variant active status"
+                        />
+                        Variant Active
+                    </label>
+                </CardContent>
+            )}
+        </Card>
+    )
 }
 
-// ─────────────────────────────────────────────
-// EditProductModal
-// ─────────────────────────────────────────────
-function EditProductModal({
+// ─── ProductFormModal (create + edit) ─────────────────────────────────────────
+
+function ProductFormModal({
     product,
     categories,
     brands,
@@ -573,320 +781,307 @@ function EditProductModal({
     attributes,
     onClose,
 }: {
-    product: Product;
-    categories: Category[];
-    brands: Brand[];
-    taxCategories: TaxCategory[];
-    units: Unit[];
-    attributes: Attribute[];
-    onClose: () => void;
+    product: Product | null
+    categories: Category[]
+    brands: Brand[]
+    taxCategories: TaxCategory[]
+    units: Unit[]
+    attributes: Attribute[]
+    onClose: () => void
 }) {
+    const isEdit = product !== null
+
+    // FIX #1 & #2 & #14: Drop useForm entirely.
+    // useForm's put(url, options) ignores the `data` option — options are event callbacks only.
+    // We manage all state ourselves and call router.post / router.visit directly.
+    const [processing, setProcessing] = useState(false)
+    // FIX #16: Field-level errors from server
+    const [errors, setErrors] = useState<Record<string, string>>({})
+
     const [formData, setFormData] = useState({
-        name: product.name,
-        product_code: product.product_code,
-        description: product.description || '',
-        category_id: product.category_id.toString(),
-        brand_id: product.brand_id?.toString() || '',
-        tax_category_id: product.tax_category_id.toString(),
-        is_active: product.is_active,
-        is_returnable: product.is_returnable,
-    });
+        name:            product?.name ?? '',
+        product_code:    product?.product_code ?? '',
+        description:     product?.description ?? '',
+        category_id:     product?.category_id?.toString() ?? '',
+        brand_id:        product?.brand_id?.toString() ?? '',
+        tax_category_id: product?.tax_category_id?.toString() ?? '',
+        is_active:       product?.is_active ?? true,
+        is_returnable:   product?.is_returnable ?? true,
+    })
 
-    const [variants, setVariants] = useState<EditVariant[]>(
-        product.variants?.map((v) => ({
-            id: v.id,
-            variant_name: v.variant_name,
-            sku: v.sku,
-            unit_id: v.unit_id.toString(),
-            net_quantity: v.net_quantity?.toString() || '',
-            mrp: v.mrp.toString(),
-            selling_price: v.selling_price.toString(),
-            cost_price: v.cost_price.toString(),
-            min_selling_price: v.min_selling_price?.toString() || '',
-            status: Boolean(v.status),
-            barcodes: v.barcodes?.length ? v.barcodes : [{ barcode: '', is_primary: true }],
-            attributes: v.attributes || {},
-            existingImages: (v.images || []).sort((a, b) => a.sort_order - b.sort_order),
-            newImages: [],
-            deletedImageIds: [],
-        })) ?? [
-            {
-                variant_name: '',
-                sku: '',
-                unit_id: '',
-                net_quantity: '',
-                mrp: '',
-                selling_price: '',
-                cost_price: '',
-                min_selling_price: '',
-                status: true,
-                barcodes: [{ barcode: '', is_primary: true }],
-                attributes: {},
-                existingImages: [],
-                newImages: [],
-                deletedImageIds: [],
-            },
-        ],
-    );
+    // FIX #3: Safe initialisation — always fall back to [emptyVariant()] when no variants
+    const [variants, setVariants] = useState<VariantState[]>(() =>
+        product?.variants?.length
+            ? product.variants.map((v) => ({
+                id:                v.id,
+                variant_name:      v.variant_name,
+                sku:               v.sku,
+                unit_id:           v.unit_id?.toString() ?? '',
+                net_quantity:      v.net_quantity?.toString() ?? '',
+                mrp:               v.mrp?.toString() ?? '',
+                selling_price:     v.selling_price?.toString() ?? '',
+                cost_price:        v.cost_price?.toString() ?? '',
+                min_selling_price: v.min_selling_price?.toString() ?? '',
+                status:            Boolean(v.status),
+                barcodes:          v.barcodes?.length
+                    ? v.barcodes
+                    : [{ barcode: '', is_primary: true }],
+                attributes:       {},
+                existingImages:   (v.images ?? []).sort((a, b) => a.sort_order - b.sort_order),
+                newImages:        [],
+                deletedImageIds:  [],
+            }))
+            : [emptyVariant()],
+    )
 
-    const [expandedVariants, setExpandedVariants] = useState<Set<number>>(new Set([0]));
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const updateVariant = useCallback(
+        (index: number, field: keyof VariantState, value: unknown) => {
+            setVariants((prev) =>
+                prev.map((v, i) => (i === index ? { ...v, [field]: value } : v)),
+            )
+        },
+        [],
+    )
 
-    const toggleVariantExpand = (index: number) =>
-        setExpandedVariants((prev) => {
-            const next = new Set(prev);
-            next.has(index) ? next.delete(index) : next.add(index);
-            return next;
-        });
+    const addVariant    = () => setVariants((v) => [...v, emptyVariant()])
+    const removeVariant = (i: number) => setVariants((v) => v.filter((_, j) => j !== i))
 
-    const updateVariant = (index: number, field: string, value: unknown) =>
-        setVariants((prev) => prev.map((v, i) => (i === index ? { ...v, [field]: value } : v)));
+    /**
+     * Build FormData manually.
+     * FIX #22: Explicitly append empty arrays so Laravel sees `variants[i][barcodes]` = []
+     * and doesn't treat it as missing/null. Using router.post with forceFormData.
+     */
+    const buildFormData = (): FormData => {
+        const fd = new FormData()
 
-    const addVariant = () =>
-        setVariants((prev) => [
-            ...prev,
-            {
-                variant_name: '',
-                sku: '',
-                unit_id: '',
-                net_quantity: '',
-                mrp: '',
-                selling_price: '',
-                cost_price: '',
-                min_selling_price: '',
-                status: true,
-                barcodes: [{ barcode: '', is_primary: true }],
-                attributes: {},
-                existingImages: [],
-                newImages: [],
-                deletedImageIds: [],
-            },
-        ]);
+        fd.append('name',            formData.name)
+        fd.append('product_code',    formData.product_code)
+        fd.append('description',     formData.description)
+        fd.append('category_id',     formData.category_id)
+        fd.append('brand_id',        formData.brand_id)
+        fd.append('tax_category_id', formData.tax_category_id)
+        fd.append('is_active',       formData.is_active ? '1' : '0')
+        fd.append('is_returnable',   formData.is_returnable ? '1' : '0')
 
-    const removeVariant = (index: number) => {
-        if (variants.length > 1) setVariants((prev) => prev.filter((_, i) => i !== index));
-    };
+        variants.forEach((v, i) => {
+            const p = `variants[${i}]`
+            if (v.id) fd.append(`${p}[id]`, String(v.id))
+            fd.append(`${p}[variant_name]`,  v.variant_name)
+            fd.append(`${p}[sku]`,           v.sku)
+            fd.append(`${p}[unit_id]`,       v.unit_id)
+            fd.append(`${p}[net_quantity]`,  v.net_quantity)
+            fd.append(`${p}[mrp]`,           v.mrp)
+            fd.append(`${p}[selling_price]`, v.selling_price)
+            fd.append(`${p}[cost_price]`,    v.cost_price)
+            fd.append(`${p}[min_selling_price]`, v.min_selling_price)
+            fd.append(`${p}[status]`,        v.status ? '1' : '0')
 
-    const addBarcode = (vIdx: number) =>
-        setVariants((prev) =>
-            prev.map((v, i) =>
-                i === vIdx ? { ...v, barcodes: [...v.barcodes, { barcode: '', is_primary: false }] } : v,
-            ),
-        );
-
-    const updateBarcode = (vIdx: number, bIdx: number, field: string, value: unknown) =>
-        setVariants((prev) =>
-            prev.map((v, i) =>
-                i === vIdx
-                    ? { ...v, barcodes: v.barcodes.map((b, bi) => (bi === bIdx ? { ...b, [field]: value } : b)) }
-                    : v,
-            ),
-        );
-
-    const removeBarcode = (vIdx: number, bIdx: number) =>
-        setVariants((prev) =>
-            prev.map((v, i) =>
-                i === vIdx && v.barcodes.length > 1
-                    ? { ...v, barcodes: v.barcodes.filter((_, bi) => bi !== bIdx) }
-                    : v,
-            ),
-        );
-
-    const updateAttribute = (vIdx: number, attrId: number, valId: number) =>
-        setVariants((prev) =>
-            prev.map((v, i) =>
-                i === vIdx ? { ...v, attributes: { ...v.attributes, [attrId]: valId } } : v,
-            ),
-        );
-
-    // Image handlers
-    const handleExistingImageDelete = (vIdx: number, imgId: number) =>
-        setVariants((prev) =>
-            prev.map((v, i) =>
-                i === vIdx ? { ...v, deletedImageIds: [...v.deletedImageIds, imgId] } : v,
-            ),
-        );
-
-    const handleNewImagesAdd = (vIdx: number, imgs: ProductImage[]) =>
-        setVariants((prev) =>
-            prev.map((v, i) => {
-                if (i !== vIdx) return v;
-                const base = v.existingImages.filter((x) => !v.deletedImageIds.includes(x.id)).length + v.newImages.length;
-                const withOrder = imgs.map((img, j) => ({
-                    ...img,
-                    sort_order: base + j,
-                    is_primary: base + j === 0,
-                }));
-                return { ...v, newImages: [...v.newImages, ...withOrder] };
-            }),
-        );
-
-    const handleNewImageRemove = (vIdx: number, imgIdx: number) =>
-        setVariants((prev) =>
-            prev.map((v, i) => {
-                if (i !== vIdx) return v;
-                const next = v.newImages.filter((_, j) => j !== imgIdx);
-                return { ...v, newImages: next };
-            }),
-        );
-
-    const handleImagesReorder = (vIdx: number, allReordered: ProductImage[]) => {
-        // allReordered is the merged/reordered list from the uploader
-        // Split back into existing and new
-        setVariants((prev) =>
-            prev.map((v, i) => {
-                if (i !== vIdx) return v;
-                const existingIds = new Set(v.existingImages.map((x) => x.id));
-                const nextExisting = allReordered
-                    .filter((img) => !img._isNew && existingIds.has(img.id))
-                    .map((img, order) => ({ ...img, sort_order: order, is_primary: order === 0 }));
-                const nextNew = allReordered
-                    .filter((img) => img._isNew)
-                    .map((img, _order) => img); // keep order already set by reorder
-                return { ...v, existingImages: nextExisting, newImages: nextNew };
-            }),
-        );
-    };
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-
-        try {
-            // 1. Submit product data (text fields + deleted_image_ids)
-            await new Promise<void>((resolve, reject) => {
-                router.put(
-                    `/warehouse/products/${product.id}`,
-                    {
-                        ...formData,
-                        category_id: Number(formData.category_id),
-                        brand_id: formData.brand_id ? Number(formData.brand_id) : null,
-                        tax_category_id: Number(formData.tax_category_id),
-                        variants: variants.map((v) => ({
-                            id: v.id ?? null,
-                            variant_name: v.variant_name,
-                            sku: v.sku,
-                            unit_id: Number(v.unit_id),
-                            net_quantity: v.net_quantity !== '' ? Number(v.net_quantity) : null,
-                            mrp: Number(v.mrp),
-                            selling_price: Number(v.selling_price),
-                            cost_price: Number(v.cost_price),
-                            min_selling_price: v.min_selling_price !== '' ? Number(v.min_selling_price) : null,
-                            status: v.status,
-                            barcodes: v.barcodes.filter((b) => b.barcode.trim() !== ''),
-                            attributes: v.attributes,
-                            deleted_image_ids: v.deletedImageIds,
-                        })),
-                    },
-                    {
-                        onSuccess: () => resolve(),
-                        onError: () => reject(new Error('Product update failed')),
-                    },
-                );
-            });
-
-            // 2. Upload new images for each variant that has staged images
-            // axios is used here (not fetch) because it automatically sends the
-            // XSRF-TOKEN cookie as X-XSRF-TOKEN, satisfying Laravel's CSRF check.
-            const axios = (await import('axios')).default;
-
-            for (const variant of variants) {
-                if (!variant.id || variant.newImages.length === 0) continue;
-
-                const formDataImg = new FormData();
-                for (const img of variant.newImages) {
-                    if (img._file) formDataImg.append('images[]', img._file);
-                }
-
-                await axios.post(
-                    `/warehouse/products/variants/${variant.id}/images`,
-                    formDataImg,
-                    { headers: { 'Content-Type': 'multipart/form-data' } },
-                );
+            // FIX #22: Always send barcodes array (even if empty placeholder)
+            const filteredBarcodes = v.barcodes.filter((b) => b.barcode.trim() !== '')
+            if (filteredBarcodes.length === 0) {
+                // Send a sentinel so Laravel sees the key as an array (won't match non-empty filter)
+                fd.append(`${p}[barcodes]`, '')
+            } else {
+                filteredBarcodes.forEach((bc, bIdx) => {
+                    fd.append(`${p}[barcodes][${bIdx}][barcode]`,    bc.barcode)
+                    fd.append(`${p}[barcodes][${bIdx}][is_primary]`, bc.is_primary ? '1' : '0')
+                })
             }
 
-            onClose();
-        } catch {
-            // errors are shown by Inertia
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
+            // Deleted image IDs (edit mode)
+            v.deletedImageIds.forEach((id, dIdx) => {
+                fd.append(`${p}[deleted_image_ids][${dIdx}]`, String(id))
+            })
+
+            // New image files
+            v.newImages.forEach((img) => {
+                if (img._file) fd.append(`${p}[images][]`, img._file)
+            })
+        })
+
+        // Laravel METHOD spoofing for PUT via FormData
+        if (isEdit) fd.append('_method', 'PUT')
+
+        return fd
+    }
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault()
+        setErrors({})
+        setProcessing(true)
+
+        const fd  = buildFormData()
+        // FIX #1: Use router.post for both create and update (PUT spoofed via _method).
+        // This correctly sends FormData including the variants array.
+        const url = isEdit
+            ? warehouse.products.update(product!.slug).url
+            : warehouse.products.store().url
+
+        router.post(url, fd, {
+            forceFormData: true,
+            onSuccess: () => {
+                // FIX #4: Reset variants state on success
+                setVariants([emptyVariant()])
+                setFormData({
+                    name: '', product_code: '', description: '',
+                    category_id: '', brand_id: '', tax_category_id: '',
+                    is_active: true, is_returnable: true,
+                })
+                onClose()
+            },
+            // FIX #16: Map server validation errors to fields
+            onError: (errs) => setErrors(errs),
+            onFinish: () => setProcessing(false),
+        })
+    }
+
+    const titleId = useId()
 
     return (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50">
+        <div
+            className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+        >
             <div className="min-h-screen px-4 py-8">
-                <Card className="mx-auto max-w-6xl">
+                <Card className="mx-auto max-w-5xl shadow-2xl">
                     <CardHeader className="border-b">
                         <div className="flex items-center justify-between">
                             <div>
-                                <CardTitle className="text-2xl">Edit Product</CardTitle>
-                                <CardDescription>Update product information and variants</CardDescription>
+                                <CardTitle id={titleId}>
+                                    {isEdit ? 'Edit Product' : 'New Product'}
+                                </CardTitle>
+                                <CardDescription>
+                                    {isEdit
+                                        ? 'Update product details and variants'
+                                        : 'Fill in product details and add variants'}
+                                </CardDescription>
                             </div>
-                            <Button variant="ghost" size="icon" onClick={onClose}>
-                                <X className="size-4" />
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={onClose}
+                                aria-label="Close dialog"
+                            >
+                                <X className="size-4" aria-hidden="true" />
                             </Button>
                         </div>
                     </CardHeader>
 
                     <form onSubmit={handleSubmit}>
                         <CardContent className="space-y-6 p-6">
-                            {/* Basic Info */}
+
+                            {/* Global error */}
+                            {errors.error && (
+                                <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+                                    {errors.error}
+                                </p>
+                            )}
+
+                            {/* Product info */}
                             <div className="space-y-4">
-                                <h3 className="text-lg font-semibold">Basic Information</h3>
+                                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Basic Information
+                                </h3>
+
                                 <div className="grid gap-4 md:grid-cols-2">
-                                    <div className="space-y-2">
-                                        <Label>Product Name *</Label>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="prod-name">Product Name *</Label>
                                         <Input
+                                            id="prod-name"
                                             value={formData.name}
-                                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                            required
+                                            onChange={(e) => setFormData((d) => ({ ...d, name: e.target.value }))}
+                                            placeholder="e.g. Basmati Rice"
+                                            aria-required="true"
+                                            aria-describedby={errors.name ? 'prod-name-err' : undefined}
                                         />
+                                        {errors.name && (
+                                            <p id="prod-name-err" className="text-xs text-destructive" role="alert">
+                                                {errors.name}
+                                            </p>
+                                        )}
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Product Code *</Label>
+
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="prod-code">
+                                            Product Code
+                                            {! isEdit && (
+                                                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                                                    (auto-generated if blank)
+                                                </span>
+                                            )}
+                                        </Label>
                                         <Input
+                                            id="prod-code"
                                             value={formData.product_code}
-                                            onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
+                                            onChange={(e) => setFormData((d) => ({ ...d, product_code: e.target.value }))}
+                                            placeholder="PRD-XXXXXXXX"
                                             className="font-mono"
-                                            required
                                         />
+                                        {errors.product_code && (
+                                            <p className="text-xs text-destructive" role="alert">{errors.product_code}</p>
+                                        )}
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Category *</Label>
+
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="prod-category">Category *</Label>
                                         <Select
                                             value={formData.category_id}
-                                            onValueChange={(v) => setFormData({ ...formData, category_id: v })}
+                                            onValueChange={(v) => setFormData((d) => ({ ...d, category_id: v }))}
                                         >
-                                            <SelectTrigger><SelectValue placeholder="Select Category" /></SelectTrigger>
+                                            <SelectTrigger id="prod-category" aria-required="true">
+                                                <SelectValue placeholder="Select Category" />
+                                            </SelectTrigger>
                                             <SelectContent>
-                                                {categories.map((cat) => (
-                                                    <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
+                                                {categories.map((c) => (
+                                                    <SelectItem key={c.id} value={c.id.toString()}>
+                                                        {c.name}
+                                                    </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
+                                        {errors.category_id && (
+                                            <p className="text-xs text-destructive" role="alert">{errors.category_id}</p>
+                                        )}
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Brand</Label>
+
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="prod-brand">
+                                            Brand{' '}
+                                            <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                                        </Label>
                                         <Select
                                             value={formData.brand_id || undefined}
-                                            onValueChange={(v) => setFormData({ ...formData, brand_id: v })}
+                                            onValueChange={(v) =>
+                                                setFormData((d) => ({ ...d, brand_id: v === 'none' ? '' : v }))
+                                            }
                                         >
-                                            <SelectTrigger><SelectValue placeholder="Select Brand (Optional)" /></SelectTrigger>
+                                            <SelectTrigger id="prod-brand">
+                                                <SelectValue placeholder="Select Brand" />
+                                            </SelectTrigger>
                                             <SelectContent>
+                                                <SelectItem value="none">— None —</SelectItem>
                                                 {brands.map((b) => (
-                                                    <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
+                                                    <SelectItem key={b.id} value={b.id.toString()}>
+                                                        {b.name}
+                                                    </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Tax Category *</Label>
+
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="prod-tax">Tax Category *</Label>
                                         <Select
                                             value={formData.tax_category_id}
-                                            onValueChange={(v) => setFormData({ ...formData, tax_category_id: v })}
+                                            onValueChange={(v) =>
+                                                setFormData((d) => ({ ...d, tax_category_id: v }))
+                                            }
                                         >
-                                            <SelectTrigger><SelectValue placeholder="Select Tax" /></SelectTrigger>
+                                            <SelectTrigger id="prod-tax" aria-required="true">
+                                                <SelectValue placeholder="Select Tax" />
+                                            </SelectTrigger>
                                             <SelectContent>
                                                 {taxCategories.map((t) => (
                                                     <SelectItem key={t.id} value={t.id.toString()}>
@@ -895,32 +1090,49 @@ function EditProductModal({
                                                 ))}
                                             </SelectContent>
                                         </Select>
+                                        {errors.tax_category_id && (
+                                            <p className="text-xs text-destructive" role="alert">{errors.tax_category_id}</p>
+                                        )}
                                     </div>
-                                    <div className="space-y-2 md:col-span-2">
-                                        <Label>Description</Label>
+
+                                    <div className="space-y-1.5 md:col-span-2">
+                                        <Label htmlFor="prod-desc">
+                                            Description{' '}
+                                            <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                                        </Label>
                                         <Textarea
+                                            id="prod-desc"
                                             value={formData.description}
-                                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                            onChange={(e) =>
+                                                setFormData((d) => ({ ...d, description: e.target.value }))
+                                            }
                                             rows={3}
+                                            className="resize-none"
+                                            placeholder="Short product description…"
                                         />
                                     </div>
+
                                     <div className="flex items-center gap-6">
-                                        <div className="flex items-center space-x-2">
+                                        <label className="flex items-center gap-2 text-sm">
                                             <Checkbox
-                                                id="is_active"
                                                 checked={formData.is_active}
-                                                onCheckedChange={(c) => setFormData({ ...formData, is_active: c as boolean })}
+                                                onCheckedChange={(c) =>
+                                                    setFormData((d) => ({ ...d, is_active: !! c }))
+                                                }
+                                                aria-label="Product is active"
                                             />
-                                            <Label htmlFor="is_active">Active</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
+                                            Active
+                                        </label>
+                                        <label className="flex items-center gap-2 text-sm">
                                             <Checkbox
-                                                id="is_returnable"
                                                 checked={formData.is_returnable}
-                                                onCheckedChange={(c) => setFormData({ ...formData, is_returnable: c as boolean })}
+                                                onCheckedChange={(c) =>
+                                                    setFormData((d) => ({ ...d, is_returnable: !! c }))
+                                                }
+                                                aria-label="Product is returnable"
                                             />
-                                            <Label htmlFor="is_returnable">Returnable</Label>
-                                        </div>
+                                            Returnable
+                                        </label>
                                     </div>
                                 </div>
                             </div>
@@ -928,265 +1140,542 @@ function EditProductModal({
                             {/* Variants */}
                             <div className="space-y-3">
                                 <div className="flex items-center justify-between">
-                                    <h3 className="text-lg font-semibold">Product Variants</h3>
-                                    <Button type="button" onClick={addVariant} size="sm">
-                                        <Plus className="mr-2 size-4" />
-                                        Add Variant
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Variants
+                                    </h3>
+                                    <Button type="button" size="sm" variant="outline" onClick={addVariant}>
+                                        <Plus className="mr-1.5 size-3.5" aria-hidden="true" /> Add Variant
                                     </Button>
                                 </div>
 
-                                {variants.map((variant, vIndex) => (
-                                    <Card key={vIndex}>
-                                        <div className="flex items-center justify-between bg-muted/30 p-4">
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                onClick={() => toggleVariantExpand(vIndex)}
-                                                className="h-auto p-0"
-                                            >
-                                                {expandedVariants.has(vIndex) ? (
-                                                    <ChevronDown className="mr-2 size-4" />
-                                                ) : (
-                                                    <ChevronRight className="mr-2 size-4" />
-                                                )}
-                                                <span className="font-medium">Variant {vIndex + 1}</span>
-                                                {variant.variant_name && (
-                                                    <span className="ml-2 text-muted-foreground">— {variant.variant_name}</span>
-                                                )}
-                                                {/* Image count badge */}
-                                                {(() => {
-                                                    const count =
-                                                        variant.existingImages.filter((x) => !variant.deletedImageIds.includes(x.id)).length +
-                                                        variant.newImages.length;
-                                                    return count > 0 ? (
-                                                        <Badge variant="secondary" className="ml-2 gap-1">
-                                                            <ImageIcon className="size-3" />
-                                                            {count}/4
-                                                        </Badge>
-                                                    ) : null;
-                                                })()}
-                                            </Button>
-                                            {variants.length > 1 && (
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={() => removeVariant(vIndex)}
-                                                    className="text-destructive hover:text-destructive"
-                                                >
-                                                    <Trash2 className="size-4" />
-                                                </Button>
-                                            )}
-                                        </div>
+                                {/* FIX #16: Surface per-variant server errors */}
+                                {Object.entries(errors)
+                                    .filter(([k]) => k.startsWith('variants.'))
+                                    .map(([k, v]) => (
+                                        <p key={k} className="text-xs text-destructive" role="alert">
+                                            {k}: {v}
+                                        </p>
+                                    ))}
 
-                                        {expandedVariants.has(vIndex) && (
-                                            <CardContent className="space-y-4 p-4">
-                                                {/* Fields */}
-                                                <div className="grid gap-3 md:grid-cols-3">
-                                                    <div className="space-y-2">
-                                                        <Label>Variant Name *</Label>
-                                                        <Input
-                                                            value={variant.variant_name}
-                                                            onChange={(e) => updateVariant(vIndex, 'variant_name', e.target.value)}
-                                                            required
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>SKU *</Label>
-                                                        <Input
-                                                            value={variant.sku}
-                                                            onChange={(e) => updateVariant(vIndex, 'sku', e.target.value)}
-                                                            className="font-mono"
-                                                            required
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>Unit *</Label>
-                                                        <Select
-                                                            value={variant.unit_id}
-                                                            onValueChange={(v) => updateVariant(vIndex, 'unit_id', v)}
-                                                        >
-                                                            <SelectTrigger><SelectValue placeholder="Select Unit" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                {units.map((u) => (
-                                                                    <SelectItem key={u.id} value={u.id.toString()}>
-                                                                        {u.name} ({u.symbol})
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>Net Quantity</Label>
-                                                        <Input
-                                                            type="number" step="0.01"
-                                                            value={variant.net_quantity}
-                                                            onChange={(e) => updateVariant(vIndex, 'net_quantity', e.target.value)}
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>MRP *</Label>
-                                                        <Input
-                                                            type="number" step="0.01"
-                                                            value={variant.mrp}
-                                                            onChange={(e) => updateVariant(vIndex, 'mrp', e.target.value)}
-                                                            required
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>Selling Price *</Label>
-                                                        <Input
-                                                            type="number" step="0.01"
-                                                            value={variant.selling_price}
-                                                            onChange={(e) => updateVariant(vIndex, 'selling_price', e.target.value)}
-                                                            required
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>Cost Price *</Label>
-                                                        <Input
-                                                            type="number" step="0.01"
-                                                            value={variant.cost_price}
-                                                            onChange={(e) => updateVariant(vIndex, 'cost_price', e.target.value)}
-                                                            required
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>Min Selling Price</Label>
-                                                        <Input
-                                                            type="number" step="0.01"
-                                                            value={variant.min_selling_price}
-                                                            onChange={(e) => updateVariant(vIndex, 'min_selling_price', e.target.value)}
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                {/* Images */}
-                                                <div className="space-y-2">
-                                                    <Label className="flex items-center gap-2">
-                                                        <ImageIcon className="size-4" />
-                                                        Images
-                                                        <span className="font-normal text-muted-foreground">(max 4 per variant)</span>
-                                                    </Label>
-                                                    <VariantImageUploader
-                                                        existingImages={variant.existingImages}
-                                                        newImages={variant.newImages}
-                                                        deletedImageIds={variant.deletedImageIds}
-                                                        onExistingDelete={(id) => handleExistingImageDelete(vIndex, id)}
-                                                        onNewAdd={(imgs) => handleNewImagesAdd(vIndex, imgs)}
-                                                        onNewRemove={(idx) => handleNewImageRemove(vIndex, idx)}
-                                                        onReorder={(all) => handleImagesReorder(vIndex, all)}
-                                                    />
-                                                </div>
-
-                                                {/* Barcodes */}
-                                                <div className="space-y-2">
-                                                    <div className="flex items-center justify-between">
-                                                        <Label className="flex items-center gap-2">
-                                                            <BarcodeIcon className="size-4" />
-                                                            Barcodes
-                                                        </Label>
-                                                        <Button type="button" variant="link" size="sm" onClick={() => addBarcode(vIndex)}>
-                                                            + Add Barcode
-                                                        </Button>
-                                                    </div>
-                                                    {variant.barcodes.map((bc, bIdx) => (
-                                                        <div key={bIdx} className="flex items-center gap-2">
-                                                            <Input
-                                                                value={bc.barcode}
-                                                                onChange={(e) => updateBarcode(vIndex, bIdx, 'barcode', e.target.value)}
-                                                                className="flex-1 font-mono"
-                                                                placeholder="Enter barcode"
-                                                            />
-                                                            <div className="flex items-center space-x-2">
-                                                                <Checkbox
-                                                                    id={`primary-${vIndex}-${bIdx}`}
-                                                                    checked={bc.is_primary}
-                                                                    onCheckedChange={(c) => updateBarcode(vIndex, bIdx, 'is_primary', c)}
-                                                                />
-                                                                <Label htmlFor={`primary-${vIndex}-${bIdx}`} className="text-xs text-muted-foreground">
-                                                                    Primary
-                                                                </Label>
-                                                            </div>
-                                                            {variant.barcodes.length > 1 && (
-                                                                <Button type="button" variant="ghost" size="icon" onClick={() => removeBarcode(vIndex, bIdx)}>
-                                                                    <X className="size-4" />
-                                                                </Button>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-
-                                                {/* Attributes */}
-                                                {attributes.length > 0 && (
-                                                    <div className="space-y-2">
-                                                        <Label>Attributes</Label>
-                                                        <div className="grid gap-3 md:grid-cols-2">
-                                                            {attributes.map((attr) => (
-                                                                <div key={attr.id} className="space-y-1.5">
-                                                                    <Label className="text-xs text-muted-foreground">{attr.name}</Label>
-                                                                    <Select
-                                                                        value={variant.attributes[attr.id]?.toString() || ''}
-                                                                        onValueChange={(v) => updateAttribute(vIndex, attr.id, Number(v))}
-                                                                    >
-                                                                        <SelectTrigger><SelectValue placeholder={`Select ${attr.name}`} /></SelectTrigger>
-                                                                        <SelectContent>
-                                                                            {attr.values.map((val) => (
-                                                                                <SelectItem key={val.id} value={val.id.toString()}>
-                                                                                    {val.value}
-                                                                                </SelectItem>
-                                                                            ))}
-                                                                        </SelectContent>
-                                                                    </Select>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                <div className="flex items-center space-x-2">
-                                                    <Checkbox
-                                                        id={`status-${vIndex}`}
-                                                        checked={variant.status}
-                                                        onCheckedChange={(c) => updateVariant(vIndex, 'status', c)}
-                                                    />
-                                                    <Label htmlFor={`status-${vIndex}`}>Variant Active</Label>
-                                                </div>
-                                            </CardContent>
-                                        )}
-                                    </Card>
+                                {variants.map((v, i) => (
+                                    <VariantForm
+                                        key={i}
+                                        index={i}
+                                        variant={v}
+                                        units={units}
+                                        attributes={attributes}
+                                        isOnly={variants.length === 1}
+                                        onChange={(field, value) => updateVariant(i, field, value)}
+                                        onRemove={() => removeVariant(i)}
+                                    />
                                 ))}
                             </div>
                         </CardContent>
 
                         <div className="flex justify-end gap-3 border-t p-6">
-                            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={onClose}
+                                disabled={processing}
+                            >
                                 Cancel
                             </Button>
-                            <Button type="submit" disabled={isSubmitting}>
-                                {isSubmitting ? (
-                                    <>
-                                        <div className="mr-2 size-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                        Saving…
-                                    </>
-                                ) : (
-                                    <>
-                                        <Save className="mr-2 size-4" />
-                                        Update Product
-                                    </>
-                                )}
+                            <Button type="submit" disabled={processing}>
+                                {processing
+                                    ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                                    : <Save className="mr-2 size-4" aria-hidden="true" />
+                                }
+                                {isEdit ? 'Update Product' : 'Create Product'}
                             </Button>
                         </div>
                     </form>
                 </Card>
             </div>
         </div>
-    );
+    )
 }
 
-// ─────────────────────────────────────────────
-// Products (Main Component)
-// ─────────────────────────────────────────────
+// ─── Pagination ───────────────────────────────────────────────────────────────
+
+function Pagination({ data }: { data: PaginatedProducts }) {
+    if (data.last_page <= 1) return null
+
+    return (
+        <nav aria-label="Product list pagination" className="flex items-center justify-between border-t px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+                {data.from != null && data.to != null ? (
+                    <>
+                        Showing <span className="font-medium">{data.from}–{data.to}</span> of{' '}
+                        <span className="font-medium">{data.total}</span>
+                    </>
+                ) : (
+                    'No results'
+                )}
+            </p>
+            <div className="flex items-center gap-1">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={data.current_page === 1}
+                    aria-label="Previous page"
+                    onClick={() =>
+                        router.get(data.links[0].url ?? '', {}, { preserveState: true })
+                    }
+                >
+                    <ChevronLeft className="size-4" aria-hidden="true" />
+                </Button>
+                {data.links.slice(1, -1).map((link) => (
+                    <Button
+                        key={link.label}
+                        variant={link.active ? 'default' : 'ghost'}
+                        size="icon"
+                        className="h-8 w-8 text-xs"
+                        disabled={! link.url || link.active}
+                        aria-label={`Page ${link.label}`}
+                        aria-current={link.active ? 'page' : undefined}
+                        onClick={() => link.url && router.get(link.url, {}, { preserveState: true })}
+                        dangerouslySetInnerHTML={{ __html: link.label }}
+                    />
+                ))}
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={data.current_page === data.last_page}
+                    aria-label="Next page"
+                    onClick={() =>
+                        router.get(
+                            data.links[data.links.length - 1].url ?? '',
+                            {},
+                            { preserveState: true },
+                        )
+                    }
+                >
+                    <ChevronRight className="size-4" aria-hidden="true" />
+                </Button>
+            </div>
+        </nav>
+    )
+}
+
+// ─── Quick-add panel ──────────────────────────────────────────────────────────
+// FIX #17: QuickVariantForm reuses VariantForm — no duplicated variant form code
+
+function QuickAddPanel({
+    categories,
+    brands,
+    taxCategories,
+    units,
+    onDone,
+}: {
+    categories: Category[]
+    brands: Brand[]
+    taxCategories: TaxCategory[]
+    units: Unit[]
+    onDone: () => void
+}) {
+    const [selectedCategory, setSelectedCategory]       = useState('')
+    const [selectedTaxCategory, setSelectedTaxCategory] = useState('')
+    const [quickProducts, setQuickProducts]             = useState<QuickProduct[]>([])
+    const [submitting, setSubmitting]                   = useState(false)
+    const [errors, setErrors]                           = useState<Record<string, string>>({})
+
+    const addProduct = () => {
+        const _id = newId()
+        setQuickProducts((p) => [
+            ...p,
+            { _id, name: '', brand_id: '', variants: [emptyQuickVariant()] },
+        ])
+    }
+
+    const updateProduct = (_id: string, field: keyof QuickProduct, value: unknown) =>
+        setQuickProducts((p) => p.map((x) => (x._id === _id ? { ...x, [field]: value } : x)))
+
+    const removeProduct = (_id: string) =>
+        setQuickProducts((p) => p.filter((x) => x._id !== _id))
+
+    const addVariant = (productId: string) =>
+        setQuickProducts((p) =>
+            p.map((x) =>
+                x._id === productId
+                    ? { ...x, variants: [...x.variants, emptyQuickVariant()] }
+                    : x,
+            ),
+        )
+
+    const updateVariant = (
+        productId: string,
+        variantId: string,
+        field: keyof QuickVariant,
+        value: unknown,
+    ) =>
+        setQuickProducts((p) =>
+            p.map((x) =>
+                x._id === productId
+                    ? {
+                        ...x,
+                        variants: x.variants.map((v) =>
+                            v._id === variantId ? { ...v, [field]: value } : v,
+                        ),
+                    }
+                    : x,
+            ),
+        )
+
+    const removeVariant = (productId: string, variantId: string) =>
+        setQuickProducts((p) =>
+            p.map((x) =>
+                x._id === productId
+                    ? { ...x, variants: x.variants.filter((v) => v._id !== variantId) }
+                    : x,
+            ),
+        )
+
+    const handleSubmit = () => {
+        setSubmitting(true)
+        setErrors({})
+        router.post(
+            warehouse.products.quick().url,
+            {
+                category_id:     Number(selectedCategory),
+                tax_category_id: Number(selectedTaxCategory),
+                products: quickProducts.map((p) => ({
+                    name:     p.name,
+                    brand_id: p.brand_id ? Number(p.brand_id) : null,
+                    variants: p.variants.map((v) => ({
+                        variant_name:      v.variant_name,
+                        sku:               v.sku,
+                        unit_id:           Number(v.unit_id),
+                        net_quantity:      v.net_quantity !== '' ? Number(v.net_quantity) : null,
+                        mrp:               Number(v.mrp),
+                        selling_price:     Number(v.selling_price),
+                        cost_price:        Number(v.cost_price),
+                        min_selling_price: v.min_selling_price !== '' ? Number(v.min_selling_price) : null,
+                        barcodes:          v.barcodes.filter((b) => b.barcode.trim() !== ''),
+                    })),
+                })),
+            },
+            {
+                onSuccess: () => onDone(),
+                onError:   (errs) => setErrors(errs),
+                onFinish:  () => setSubmitting(false),
+            },
+        )
+    }
+
+    const ready = selectedCategory && selectedTaxCategory
+
+    return (
+        <div className="flex h-full flex-1 flex-col gap-4 p-4">
+            <Card>
+                <CardHeader>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <CardTitle>Quick Add Products</CardTitle>
+                            <CardDescription>Bulk-add multiple products under one category</CardDescription>
+                        </div>
+                        <Button variant="outline" onClick={onDone}>
+                            <X className="mr-2 size-4" aria-hidden="true" /> Cancel
+                        </Button>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <div className="flex flex-wrap items-end gap-3">
+                        <div className="w-56 space-y-1.5">
+                            <Label htmlFor="qp-category" className="text-xs">Category *</Label>
+                            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                                <SelectTrigger id="qp-category" aria-required="true">
+                                    <SelectValue placeholder="Select Category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {categories.map((c) => (
+                                        <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="w-56 space-y-1.5">
+                            <Label htmlFor="qp-tax" className="text-xs">Tax Category *</Label>
+                            <Select value={selectedTaxCategory} onValueChange={setSelectedTaxCategory}>
+                                <SelectTrigger id="qp-tax" aria-required="true">
+                                    <SelectValue placeholder="Select Tax" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {taxCategories.map((t) => (
+                                        <SelectItem key={t.id} value={t.id.toString()}>
+                                            {t.name} ({t.tax_percent}%)
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <Button onClick={addProduct} disabled={! ready} size="sm">
+                            <Plus className="mr-1.5 size-3.5" aria-hidden="true" /> Add Product Row
+                        </Button>
+                    </div>
+                    {errors.error && (
+                        <p className="mt-3 text-sm text-destructive" role="alert">{errors.error}</p>
+                    )}
+                </CardContent>
+            </Card>
+
+            {quickProducts.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center text-center text-muted-foreground">
+                    <div>
+                        <PackagePlus className="mx-auto mb-2 size-10 opacity-30" aria-hidden="true" />
+                        <p className="text-sm">
+                            No products yet — select a category and click "Add Product Row"
+                        </p>
+                    </div>
+                </div>
+            ) : (
+                <div className="space-y-4 overflow-auto">
+                    {quickProducts.map((product) => (
+                        <Card key={product._id}>
+                            <CardContent className="space-y-4 p-4">
+                                <div className="flex items-start gap-3">
+                                    <div className="grid flex-1 gap-3 md:grid-cols-2">
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Product Name *</Label>
+                                            <Input
+                                                value={product.name}
+                                                onChange={(e) =>
+                                                    updateProduct(product._id, 'name', e.target.value)
+                                                }
+                                                placeholder="e.g. Tata Salt"
+                                                aria-required="true"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs">Brand</Label>
+                                            <Select
+                                                value={product.brand_id || undefined}
+                                                onValueChange={(v) =>
+                                                    updateProduct(
+                                                        product._id,
+                                                        'brand_id',
+                                                        v === 'none' ? '' : v,
+                                                    )
+                                                }
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select Brand (optional)" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">— None —</SelectItem>
+                                                    {brands.map((b) => (
+                                                        <SelectItem key={b.id} value={b.id.toString()}>
+                                                            {b.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        aria-label={`Remove product ${product.name || product._id}`}
+                                        onClick={() => removeProduct(product._id)}
+                                        className="mt-6 rounded p-1.5 text-destructive hover:bg-destructive/10"
+                                    >
+                                        <Trash2 className="size-4" aria-hidden="true" />
+                                    </button>
+                                </div>
+
+                                {product.variants.map((variant, vIdx) => (
+                                    <div key={variant._id} className="rounded-lg border bg-muted/20 p-3">
+                                        <div className="mb-2 flex items-center justify-between">
+                                            <span className="text-xs font-medium">Variant {vIdx + 1}</span>
+                                            {product.variants.length > 1 && (
+                                                <button
+                                                    type="button"
+                                                    aria-label={`Remove variant ${vIdx + 1}`}
+                                                    onClick={() => removeVariant(product._id, variant._id)}
+                                                    className="text-destructive hover:opacity-80"
+                                                >
+                                                    <X className="size-3.5" aria-hidden="true" />
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="grid gap-2 md:grid-cols-4 lg:grid-cols-8">
+                                            {(
+                                                [
+                                                    { label: 'Name *',    field: 'variant_name',     placeholder: '1kg' },
+                                                    { label: 'SKU *',     field: 'sku',              placeholder: 'SKU', mono: true },
+                                                    { label: 'Qty',       field: 'net_quantity',     placeholder: '1',   num: true },
+                                                    { label: 'MRP *',     field: 'mrp',              placeholder: '0.00', num: true },
+                                                    { label: 'Selling *', field: 'selling_price',    placeholder: '0.00', num: true },
+                                                    { label: 'Min Sell',  field: 'min_selling_price', placeholder: '0.00', num: true },
+                                                    { label: 'Cost *',    field: 'cost_price',       placeholder: '0.00', num: true },
+                                                ] as { label: string; field: keyof QuickVariant; placeholder: string; mono?: boolean; num?: boolean }[]
+                                            ).map(({ label, field, placeholder, mono, num }) => (
+                                                <div key={field} className="space-y-1">
+                                                    <Label className="text-[11px]">{label}</Label>
+                                                    <Input
+                                                        type={num ? 'number' : 'text'}
+                                                        step={num ? '0.01' : undefined}
+                                                        value={variant[field] as string}
+                                                        onChange={(e) =>
+                                                            updateVariant(
+                                                                product._id,
+                                                                variant._id,
+                                                                field,
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        placeholder={placeholder}
+                                                        className={`h-8 text-xs ${mono ? 'font-mono' : ''}`}
+                                                        aria-label={label.replace(' *', '')}
+                                                    />
+                                                </div>
+                                            ))}
+
+                                            <div className="space-y-1">
+                                                <Label className="text-[11px]">Unit *</Label>
+                                                <Select
+                                                    value={variant.unit_id}
+                                                    onValueChange={(v) =>
+                                                        updateVariant(product._id, variant._id, 'unit_id', v)
+                                                    }
+                                                >
+                                                    <SelectTrigger className="h-8 text-xs" aria-label="Unit">
+                                                        <SelectValue placeholder="Unit" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {units.map((u) => (
+                                                            <SelectItem key={u.id} value={u.id.toString()}>
+                                                                {u.symbol}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            {/* Barcodes */}
+                                            <div className="space-y-1.5 md:col-span-full">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="text-[11px]">Barcodes</Label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            updateVariant(
+                                                                product._id,
+                                                                variant._id,
+                                                                'barcodes',
+                                                                [
+                                                                    ...variant.barcodes,
+                                                                    { barcode: '', is_primary: false },
+                                                                ],
+                                                            )
+                                                        }
+                                                        className="text-[11px] text-primary hover:underline"
+                                                        aria-label="Add barcode"
+                                                    >
+                                                        + Add
+                                                    </button>
+                                                </div>
+                                                {variant.barcodes.map((bc, bIdx) => (
+                                                    <div key={bIdx} className="flex items-center gap-2">
+                                                        <Input
+                                                            value={bc.barcode}
+                                                            onChange={(e) =>
+                                                                updateVariant(
+                                                                    product._id,
+                                                                    variant._id,
+                                                                    'barcodes',
+                                                                    variant.barcodes.map((b, i) =>
+                                                                        i === bIdx
+                                                                            ? { ...b, barcode: e.target.value }
+                                                                            : b,
+                                                                    ),
+                                                                )
+                                                            }
+                                                            placeholder="Barcode value"
+                                                            className="h-8 flex-1 font-mono text-xs"
+                                                            aria-label={`Barcode ${bIdx + 1}`}
+                                                        />
+                                                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                            <Checkbox
+                                                                checked={bc.is_primary}
+                                                                onCheckedChange={(c) =>
+                                                                    updateVariant(
+                                                                        product._id,
+                                                                        variant._id,
+                                                                        'barcodes',
+                                                                        variant.barcodes.map((b, i) => ({
+                                                                            ...b,
+                                                                            is_primary: c ? i === bIdx : false,
+                                                                        })),
+                                                                    )
+                                                                }
+                                                                aria-label={`Set barcode ${bIdx + 1} as primary`}
+                                                            />
+                                                            Primary
+                                                        </label>
+                                                        {variant.barcodes.length > 1 && (
+                                                            <button
+                                                                type="button"
+                                                                aria-label={`Remove barcode ${bIdx + 1}`}
+                                                                onClick={() =>
+                                                                    updateVariant(
+                                                                        product._id,
+                                                                        variant._id,
+                                                                        'barcodes',
+                                                                        variant.barcodes.filter(
+                                                                            (_, i) => i !== bIdx,
+                                                                        ),
+                                                                    )
+                                                                }
+                                                                className="text-muted-foreground hover:text-destructive"
+                                                            >
+                                                                <X className="size-3.5" aria-hidden="true" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => addVariant(product._id)}
+                                    className="text-xs"
+                                >
+                                    <Plus className="mr-1 size-3.5" aria-hidden="true" /> Add Variant
+                                </Button>
+                            </CardContent>
+                        </Card>
+                    ))}
+
+                    <div className="flex justify-end gap-3 pb-4">
+                        <Button variant="outline" onClick={onDone} disabled={submitting}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleSubmit} disabled={submitting || ! ready}>
+                            {submitting ? (
+                                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                            ) : (
+                                <Save className="mr-2 size-4" aria-hidden="true" />
+                            )}
+                            Save {quickProducts.length} Product
+                            {quickProducts.length !== 1 ? 's' : ''}
+                        </Button>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ─── Products (main page) ─────────────────────────────────────────────────────
+
 export default function Products({
     products,
     categories = [],
@@ -1196,623 +1685,324 @@ export default function Products({
     attributes = [],
     filters,
 }: Props) {
-    const [view, setView] = useState<'list' | 'quick'>('list');
-    const [searchQuery, setSearchQuery] = useState(filters.search || '');
-    const [expandedProducts, setExpandedProducts] = useState<Set<number>>(new Set());
-    const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [view, setView]               = useState<'list' | 'quick'>('list')
+    const [searchQuery, setSearchQuery] = useState(filters.search ?? '')
+    const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+    const [modalProduct, setModalProduct] = useState<Product | null | 'new'>(null)
 
-    const [selectedCategory, setSelectedCategory] = useState('');
-    const [selectedTaxCategory, setSelectedTaxCategory] = useState('');
-    const [quickProducts, setQuickProducts] = useState<QuickProduct[]>([]);
+    // FIX #20: Proper debounce cleanup using useRef + useEffect
+    const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => {
+        return () => {
+            if (searchTimer.current) clearTimeout(searchTimer.current)
+        }
+    }, [])
 
-    // Debounced search via Inertia
     const handleSearch = (q: string) => {
-        setSearchQuery(q);
-        router.get('/warehouse/products', { search: q, per_page: filters.per_page }, {
-            preserveState: true,
-            replace: true,
-        });
-    };
-
-    const handlePageChange = (url: string) => {
-        router.visit(url, { preserveState: true });
-    };
-
-    const handlePerPageChange = (value: string) => {
-        router.get('/warehouse/products', { search: searchQuery, per_page: Number(value) }, {
-            preserveState: true,
-            replace: true,
-        });
-    };
+        setSearchQuery(q)
+        if (searchTimer.current) clearTimeout(searchTimer.current)
+        searchTimer.current = setTimeout(() => {
+            router.get(
+                '/warehouse/products',
+                { search: q || undefined, per_page: filters.per_page },
+                { preserveState: true, replace: true },
+            )
+        }, 350)
+    }
 
     const toggleExpand = (id: number) =>
-        setExpandedProducts((prev) => {
-            const next = new Set(prev);
-            next.has(id) ? next.delete(id) : next.add(id);
-            return next;
-        });
+        setExpandedIds((prev) => {
+            const next = new Set(prev)
+            next.has(id) ? next.delete(id) : next.add(id)
+            return next
+        })
 
-    // ── Quick Add helpers ────────────────────────────────────────────────────
-    const addQuickProduct = () => {
-        const id = Date.now().toString();
-        setQuickProducts((prev) => [
-            ...prev,
-            {
-                id,
-                name: '',
-                brand_id: '',
-                variants: [{
-                    id: `${id}-v1`,
-                    variant_name: '',
-                    sku: '',
-                    unit_id: '',
-                    net_quantity: '',
-                    mrp: '',
-                    selling_price: '',
-                    cost_price: '',
-                    min_selling_price: '',
-                    barcodes: [{ barcode: '', is_primary: true }],
-                }],
-            },
-        ]);
-    };
+    if (view === 'quick') {
+        return (
+            <AppLayout breadcrumbs={breadcrumbs}>
+                <Head title="Quick Add Products" />
+                <QuickAddPanel
+                    categories={categories}
+                    brands={brands}
+                    taxCategories={taxCategories}
+                    units={units}
+                    onDone={() => setView('list')}
+                />
+            </AppLayout>
+        )
+    }
 
-    const removeQuickProduct = (productId: string) =>
-        setQuickProducts((prev) => prev.filter((p) => p.id !== productId));
-
-    const updateQuickProduct = (productId: string, field: string, value: unknown) =>
-        setQuickProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, [field]: value } : p)));
-
-    const addQuickVariant = (productId: string) =>
-        setQuickProducts((prev) =>
-            prev.map((p) =>
-                p.id === productId
-                    ? {
-                          ...p,
-                          variants: [
-                              ...p.variants,
-                              {
-                                  id: `${productId}-v${p.variants.length + 1}`,
-                                  variant_name: '',
-                                  sku: '',
-                                  unit_id: '',
-                                  net_quantity: '',
-                                  mrp: '',
-                                  selling_price: '',
-                                  cost_price: '',
-                                  min_selling_price: '',
-                                  barcodes: [{ barcode: '', is_primary: true }],
-                              },
-                          ],
-                      }
-                    : p,
-            ),
-        );
-
-    const updateQuickVariant = (productId: string, variantId: string, field: string, value: unknown) =>
-        setQuickProducts((prev) =>
-            prev.map((p) =>
-                p.id === productId
-                    ? { ...p, variants: p.variants.map((v) => (v.id === variantId ? { ...v, [field]: value } : v)) }
-                    : p,
-            ),
-        );
-
-    const removeQuickVariant = (productId: string, variantId: string) =>
-        setQuickProducts((prev) =>
-            prev.map((p) =>
-                p.id === productId ? { ...p, variants: p.variants.filter((v) => v.id !== variantId) } : p,
-            ),
-        );
-
-    const addQuickBarcode = (productId: string, variantId: string) =>
-        setQuickProducts((prev) =>
-            prev.map((p) =>
-                p.id === productId
-                    ? {
-                          ...p,
-                          variants: p.variants.map((v) =>
-                              v.id === variantId
-                                  ? { ...v, barcodes: [...v.barcodes, { barcode: '', is_primary: false }] }
-                                  : v,
-                          ),
-                      }
-                    : p,
-            ),
-        );
-
-    const updateQuickBarcode = (productId: string, variantId: string, bIdx: number, field: string, value: unknown) =>
-        setQuickProducts((prev) =>
-            prev.map((p) =>
-                p.id === productId
-                    ? {
-                          ...p,
-                          variants: p.variants.map((v) =>
-                              v.id === variantId
-                                  ? {
-                                        ...v,
-                                        barcodes: v.barcodes.map((b, i) =>
-                                            i === bIdx ? { ...b, [field]: value } : b,
-                                        ),
-                                    }
-                                  : v,
-                          ),
-                      }
-                    : p,
-            ),
-        );
-
-    const removeQuickBarcode = (productId: string, variantId: string, bIdx: number) =>
-        setQuickProducts((prev) =>
-            prev.map((p) =>
-                p.id === productId
-                    ? {
-                          ...p,
-                          variants: p.variants.map((v) =>
-                              v.id === variantId && v.barcodes.length > 1
-                                  ? { ...v, barcodes: v.barcodes.filter((_, i) => i !== bIdx) }
-                                  : v,
-                          ),
-                      }
-                    : p,
-            ),
-        );
-
-    const handleQuickSubmit = () => {
-        if (!selectedCategory || !selectedTaxCategory) {
-            alert('Please select category and tax category');
-            return;
-        }
-
-        router.post(
-            '/warehouse/products/quick',
-            {
-                category_id: Number(selectedCategory),
-                tax_category_id: Number(selectedTaxCategory),
-                products: quickProducts.map((p) => ({
-                    name: p.name,
-                    brand_id: p.brand_id ? Number(p.brand_id) : null,
-                    variants: p.variants.map((v) => ({
-                        variant_name: v.variant_name,
-                        sku: v.sku,
-                        unit_id: Number(v.unit_id),
-                        net_quantity: v.net_quantity !== '' ? Number(v.net_quantity) : null,
-                        mrp: Number(v.mrp),
-                        selling_price: Number(v.selling_price),
-                        cost_price: Number(v.cost_price),
-                        min_selling_price: v.min_selling_price !== '' ? Number(v.min_selling_price) : null,
-                        barcodes: v.barcodes.filter((b) => b.barcode.trim() !== ''),
-                    })),
-                })),
-            },
-            {
-                onSuccess: () => {
-                    setView('list');
-                    setQuickProducts([]);
-                    setSelectedCategory('');
-                    setSelectedTaxCategory('');
-                },
-            },
-        );
-    };
-
-    // ── Render ───────────────────────────────────────────────────────────────
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Products" />
 
-            {view === 'list' && (
-                <div className="flex h-full flex-1 flex-col gap-4 p-4">
-                    <Card>
-                        <CardHeader>
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <CardTitle className="text-2xl">Products</CardTitle>
-                                    <CardDescription>Manage your product inventory</CardDescription>
-                                </div>
-                                <Button onClick={() => setView('quick')}>
-                                    <Zap className="mr-2 size-4" />
-                                    Quick Add Products
-                                </Button>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="flex items-center gap-3">
-                                <div className="relative flex-1">
-                                    <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                    <Input
-                                        placeholder="Search products by name or code…"
-                                        value={searchQuery}
-                                        onChange={(e) => handleSearch(e.target.value)}
-                                        className="pl-9"
-                                    />
-                                </div>
-                                <Select value={String(filters.per_page)} onValueChange={handlePerPageChange}>
-                                    <SelectTrigger className="w-32">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {[10, 20, 50, 100].map((n) => (
-                                            <SelectItem key={n} value={String(n)}>{n} / page</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </CardContent>
-                    </Card>
+            <div className="flex h-full flex-1 flex-col gap-4 p-4 md:p-6">
+                {/* Toolbar */}
+                <Card className="border-sidebar-border/70 shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+                        <div>
+                            <CardTitle className="text-xl font-bold">Products</CardTitle>
+                            <CardDescription>
+                                {products.total} product{products.total !== 1 ? 's' : ''} total
+                            </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setView('quick')}>
+                                <Zap className="mr-1.5 size-3.5" aria-hidden="true" /> Quick Add
+                            </Button>
+                            <Button size="sm" onClick={() => setModalProduct('new')}>
+                                <Plus className="mr-1.5 size-3.5" aria-hidden="true" /> New Product
+                            </Button>
+                        </div>
+                    </CardHeader>
 
-                    <Card className="flex-1 overflow-hidden">
-                        <div className="h-full overflow-auto">
-                            <Table>
-                                <TableHeader className="sticky top-0 bg-muted/50">
-                                    <TableRow>
-                                        <TableHead className="w-12"></TableHead>
-                                        <TableHead>Code</TableHead>
-                                        <TableHead>Name</TableHead>
-                                        <TableHead>Category</TableHead>
-                                        <TableHead>Brand</TableHead>
-                                        <TableHead>Variants</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Actions</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {products.data.length > 0 ? (
-                                        products.data.map((product) => (
-                                            <React.Fragment key={product.id}>
-                                                <TableRow className="hover:bg-accent/50">
-                                                    <TableCell>
-                                                        {product.variants && product.variants.length > 0 && (
-                                                            <Button variant="ghost" size="icon" onClick={() => toggleExpand(product.id)}>
-                                                                {expandedProducts.has(product.id) ? (
-                                                                    <ChevronDown className="size-4" />
-                                                                ) : (
-                                                                    <ChevronRight className="size-4" />
-                                                                )}
-                                                            </Button>
-                                                        )}
-                                                    </TableCell>
-                                                    <TableCell className="font-mono text-sm">{product.product_code}</TableCell>
-                                                    <TableCell className="font-medium">{product.name}</TableCell>
-                                                    <TableCell className="text-muted-foreground">{product.category?.name || '-'}</TableCell>
-                                                    <TableCell className="text-muted-foreground">{product.brand?.name || '-'}</TableCell>
-                                                    <TableCell className="text-muted-foreground">
-                                                        {product.variants?.length || 0} variant(s)
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge variant={product.is_active ? 'default' : 'destructive'}>
-                                                            {product.is_active ? 'Active' : 'Inactive'}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <Button variant="ghost" size="icon" onClick={() => setEditingProduct(product)}>
-                                                            <Edit2 className="size-4" />
-                                                        </Button>
-                                                    </TableCell>
-                                                </TableRow>
+                    <CardContent className="pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="relative max-w-sm flex-1">
+                                <Search
+                                    className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                                    aria-hidden="true"
+                                />
+                                <Input
+                                    placeholder="Search by name or code…"
+                                    value={searchQuery}
+                                    onChange={(e) => handleSearch(e.target.value)}
+                                    className="h-9 pl-9"
+                                    aria-label="Search products"
+                                />
+                                {searchQuery && (
+                                    <button
+                                        type="button"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                        onClick={() => handleSearch('')}
+                                        aria-label="Clear search"
+                                    >
+                                        <X className="size-3.5" aria-hidden="true" />
+                                    </button>
+                                )}
+                            </div>
+                            <Select
+                                value={String(filters.per_page)}
+                                onValueChange={(v) =>
+                                    router.get(
+                                        '/warehouse/products',
+                                        { search: searchQuery, per_page: Number(v) },
+                                        { preserveState: true, replace: true },
+                                    )
+                                }
+                            >
+                                <SelectTrigger className="h-9 w-28" aria-label="Items per page">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {[10, 20, 50, 100].map((n) => (
+                                        <SelectItem key={n} value={String(n)}>
+                                            {n} / page
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </CardContent>
+                </Card>
 
-                                                {expandedProducts.has(product.id) && product.variants && product.variants.length > 0 && (
-                                                    <TableRow>
-                                                        <TableCell colSpan={8} className="bg-muted/30 p-0">
-                                                            <div className="p-4">
-                                                                <Table>
-                                                                    <TableHeader>
-                                                                        <TableRow className="text-xs">
-                                                                            <TableHead>Variant</TableHead>
-                                                                            <TableHead>SKU</TableHead>
-                                                                            <TableHead>Unit</TableHead>
-                                                                            <TableHead className="text-right">Qty</TableHead>
-                                                                            <TableHead className="text-right">MRP</TableHead>
-                                                                            <TableHead className="text-right">Selling</TableHead>
-                                                                            <TableHead className="text-right">Cost</TableHead>
-                                                                            <TableHead>Images</TableHead>
-                                                                            <TableHead className="text-center">Status</TableHead>
-                                                                        </TableRow>
-                                                                    </TableHeader>
-                                                                    <TableBody>
-                                                                        {product.variants.map((variant) => (
-                                                                            <TableRow key={variant.id} className="border-b last:border-0">
-                                                                                <TableCell className="text-sm">
-                                                                                    <div className="flex gap-2">
-                                                                                        {variant.variant_name}
-                                                                                        {variant.barcodes && variant.barcodes.length > 0 && (
-                                                                                            <div className="flex flex-wrap gap-1">
-                                                                                                {variant.barcodes.map((barcode, bIdx) => (
-                                                                                                    <Badge key={bIdx} variant="outline" className="text-xs font-mono">
-                                                                                                        <BarcodeIcon className="mr-1 size-3" />
-                                                                                                        {barcode.barcode}
-                                                                                                    </Badge>
-                                                                                                ))}
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </TableCell>
-                                                                                <TableCell className="font-mono text-sm">{variant.sku}</TableCell>
-                                                                                <TableCell className="text-sm">
-                                                                                    {units.find((u) => u.id === Number(variant.unit_id))?.symbol || '-'}
-                                                                                </TableCell>
-                                                                                <TableCell className="text-right text-sm">{variant.net_quantity}</TableCell>
-                                                                                <TableCell className="text-right text-sm">₹{Number(variant.mrp).toFixed(2)}</TableCell>
-                                                                                <TableCell className="text-right text-sm">₹{Number(variant.selling_price).toFixed(2)}</TableCell>
-                                                                                <TableCell className="text-right text-sm">₹{Number(variant.cost_price).toFixed(2)}</TableCell>
-                                                                                <TableCell>
-                                                                                    <div className="flex gap-1">
-                                                                                        {variant.images && variant.images.length > 0 ? (
-                                                                                            variant.images
-                                                                                                .sort((a, b) => a.sort_order - b.sort_order)
-                                                                                                .slice(0, 4)
-                                                                                                .map((img) => (
-                                                                                                    <div
-                                                                                                        key={img.id}
-                                                                                                        className={`size-8 overflow-hidden rounded border-2 ${img.is_primary ? 'border-primary' : 'border-border'}`}
-                                                                                                    >
-                                                                                                        <img
-                                                                                                            src={img.url}
-                                                                                                            alt=""
-                                                                                                            className="size-full object-cover"
-                                                                                                        />
-                                                                                                    </div>
-                                                                                                ))
-                                                                                        ) : (
-                                                                                            <span className="text-xs text-muted-foreground">—</span>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </TableCell>
-                                                                                <TableCell className="text-center">
-                                                                                    <div className={`mx-auto size-2 rounded-full ${variant.status ? 'bg-green-500' : 'bg-red-500'}`} />
-                                                                                </TableCell>
-                                                                            </TableRow>
-                                                                        ))}
-                                                                    </TableBody>
-                                                                </Table>
-                                                            </div>
-                                                        </TableCell>
-                                                    </TableRow>
+                {/* Table */}
+                <Card className="flex-1 border-sidebar-border/70 shadow-none">
+                    <Table>
+                        <TableHeader>
+                            <TableRow className="bg-muted/20">
+                                <TableHead className="w-10 pl-4" />
+                                <TableHead>Code</TableHead>
+                                <TableHead>Name</TableHead>
+                                <TableHead className="hidden md:table-cell">Category</TableHead>
+                                <TableHead className="hidden md:table-cell">Brand</TableHead>
+                                <TableHead className="hidden lg:table-cell">Variants</TableHead>
+                                <TableHead className="w-20 text-center">Status</TableHead>
+                                <TableHead className="pr-4 text-right">Actions</TableHead>
+                            </TableRow>
+                        </TableHeader>
+
+                        <TableBody>
+                            {products.data.length > 0 ? (
+                                products.data.map((product) => (
+                                    <React.Fragment key={product.id}>
+                                        <TableRow className="hover:bg-muted/50">
+                                            <TableCell className="pl-4">
+                                                {(product.variants?.length ?? 0) > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        aria-label={
+                                                            expandedIds.has(product.id)
+                                                                ? `Collapse ${product.name}`
+                                                                : `Expand ${product.name}`
+                                                        }
+                                                        aria-expanded={expandedIds.has(product.id)}
+                                                        onClick={() => toggleExpand(product.id)}
+                                                        className="rounded p-1 hover:bg-muted"
+                                                    >
+                                                        <ChevronDown
+                                                            className={`size-4 transition-transform ${expandedIds.has(product.id) ? '' : '-rotate-90'}`}
+                                                            aria-hidden="true"
+                                                        />
+                                                    </button>
                                                 )}
-                                            </React.Fragment>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
-                                                {searchQuery ? 'No products match your search.' : 'No products yet.'}
+                                            </TableCell>
+                                            <TableCell className="font-mono text-xs text-muted-foreground">
+                                                {product.product_code}
+                                            </TableCell>
+                                            <TableCell className="font-medium">{product.name}</TableCell>
+                                            <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                                                {product.category?.name ?? '—'}
+                                            </TableCell>
+                                            <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                                                {product.brand?.name ?? '—'}
+                                            </TableCell>
+                                            <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
+                                                {product.variants?.length ?? 0} variant
+                                                {(product.variants?.length ?? 0) !== 1 ? 's' : ''}
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                                <Badge
+                                                    variant={product.is_active ? 'default' : 'secondary'}
+                                                    className="text-xs"
+                                                >
+                                                    {product.is_active ? 'Active' : 'Inactive'}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="pr-4 text-right">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8"
+                                                    aria-label={`Edit ${product.name}`}
+                                                    onClick={() => setModalProduct(product)}
+                                                >
+                                                    <Edit2 className="size-4" aria-hidden="true" />
+                                                </Button>
                                             </TableCell>
                                         </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-                        <Pagination data={products} onPageChange={handlePageChange} />
-                    </Card>
-                </div>
-            )}
 
-            {view === 'quick' && (
-                <div className="flex h-full flex-1 flex-col gap-4 p-4">
-                    <Card>
-                        <CardHeader>
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <CardTitle className="text-2xl">Quick Add Products</CardTitle>
-                                    <CardDescription>Add multiple products of a single category at once</CardDescription>
-                                </div>
-                                <Button variant="outline" onClick={() => setView('list')}>
-                                    <X className="mr-2 size-4" />
-                                    Cancel
-                                </Button>
-                            </div>
-                        </CardHeader>
-                    </Card>
-
-                    <Card className="flex-1 overflow-hidden">
-                        <CardHeader className="border-b">
-                            <div className="flex gap-2">
-                                <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                                    <SelectTrigger className="w-full">
-                                        <SelectValue placeholder="Select Category" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {categories.map((cat) => (
-                                            <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Select value={selectedTaxCategory} onValueChange={setSelectedTaxCategory}>
-                                    <SelectTrigger className="w-full">
-                                        <SelectValue placeholder="Select Tax" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {taxCategories.map((tax) => (
-                                            <SelectItem key={tax.id} value={tax.id.toString()}>
-                                                {tax.name} ({tax.tax_percent}%)
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Button onClick={addQuickProduct} disabled={!selectedCategory || !selectedTaxCategory} size="sm">
-                                    <Plus className="mr-2 size-4" />
-                                    Add Product
-                                </Button>
-                            </div>
-                        </CardHeader>
-
-                        <div className="h-full overflow-auto p-4">
-                            {quickProducts.length === 0 ? (
-                                <div className="flex h-48 items-center justify-center text-muted-foreground">
-                                    <div className="text-center">
-                                        <PackagePlus className="mx-auto mb-2 size-12 opacity-50" />
-                                        <p>No products added yet</p>
-                                        <p className="text-sm">Click "Add Product" to start</p>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    {quickProducts.map((product) => (
-                                        <Card key={product.id} className="bg-gray-50">
-                                            <CardContent className="space-y-3 p-4">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="grid flex-1 gap-3 md:grid-cols-2">
-                                                        <div className="space-y-2">
-                                                            <Label>Product Name *</Label>
-                                                            <Input
-                                                                value={product.name}
-                                                                onChange={(e) => updateQuickProduct(product.id, 'name', e.target.value)}
-                                                                placeholder="Enter product name"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label>Brand</Label>
-                                                            <Select
-                                                                value={product.brand_id || undefined}
-                                                                onValueChange={(v) => updateQuickProduct(product.id, 'brand_id', v)}
-                                                            >
-                                                                <SelectTrigger className="w-full">
-                                                                    <SelectValue placeholder="Select Brand (Optional)" />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    {brands.map((b) => (
-                                                                        <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
-                                                                    ))}
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                    </div>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => removeQuickProduct(product.id)}
-                                                        className="text-destructive"
-                                                    >
-                                                        <Trash2 className="size-4" />
-                                                    </Button>
-                                                </div>
-
-                                                <div className="space-y-2">
-                                                    <div className="flex items-center justify-between">
-                                                        <Label>Variants</Label>
-                                                        <Button type="button" variant="link" size="sm" onClick={() => addQuickVariant(product.id)}>
-                                                            + Add Variant
-                                                        </Button>
-                                                    </div>
-
-                                                    <div className="space-y-3">
-                                                        {product.variants.map((variant, vIdx) => (
-                                                            <Card key={variant.id} className="bg-gray-50">
-                                                                <CardContent className="space-y-3 p-3">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <span className="text-sm font-medium">Variant {vIdx + 1}</span>
-                                                                        {product.variants.length > 1 && (
-                                                                            <Button
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                onClick={() => removeQuickVariant(product.id, variant.id)}
-                                                                                className="h-8 w-8 text-destructive"
-                                                                            >
-                                                                                <X className="size-4" />
-                                                                            </Button>
-                                                                        )}
-                                                                    </div>
-
-                                                                    <div className="grid gap-2 md:grid-cols-4">
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">Variant *</Label>
-                                                                            <Input value={variant.variant_name} onChange={(e) => updateQuickVariant(product.id, variant.id, 'variant_name', e.target.value)} placeholder="1kg" className="h-9" />
-                                                                        </div>
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">SKU *</Label>
-                                                                            <Input value={variant.sku} onChange={(e) => updateQuickVariant(product.id, variant.id, 'sku', e.target.value)} placeholder="SKU" className="h-9 font-mono" />
-                                                                        </div>
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">Unit *</Label>
-                                                                            <Select value={variant.unit_id} onValueChange={(v) => updateQuickVariant(product.id, variant.id, 'unit_id', v)}>
-                                                                                <SelectTrigger className="w-full"><SelectValue placeholder="Unit" /></SelectTrigger>
-                                                                                <SelectContent>
-                                                                                    {units.map((u) => <SelectItem key={u.id} value={u.id.toString()}>{u.symbol} ({u.name})</SelectItem>)}
-                                                                                </SelectContent>
-                                                                            </Select>
-                                                                        </div>
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">Qty</Label>
-                                                                            <Input type="number" step="0.01" value={variant.net_quantity} onChange={(e) => updateQuickVariant(product.id, variant.id, 'net_quantity', e.target.value)} placeholder="1" className="h-9" />
-                                                                        </div>
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">MRP *</Label>
-                                                                            <Input type="number" step="0.01" value={variant.mrp} onChange={(e) => updateQuickVariant(product.id, variant.id, 'mrp', e.target.value)} placeholder="0.00" className="h-9" />
-                                                                        </div>
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">Selling *</Label>
-                                                                            <Input type="number" step="0.01" value={variant.selling_price} onChange={(e) => updateQuickVariant(product.id, variant.id, 'selling_price', e.target.value)} placeholder="0.00" className="h-9" />
-                                                                        </div>
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">Min Selling</Label>
-                                                                            <Input type="number" step="0.01" value={variant.min_selling_price} onChange={(e) => updateQuickVariant(product.id, variant.id, 'min_selling_price', e.target.value)} placeholder="0.00" className="h-9" />
-                                                                        </div>
-                                                                        <div className="space-y-1">
-                                                                            <Label className="text-xs">Cost *</Label>
-                                                                            <Input type="number" step="0.01" value={variant.cost_price} onChange={(e) => updateQuickVariant(product.id, variant.id, 'cost_price', e.target.value)} placeholder="0.00" className="h-9" />
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Barcodes */}
-                                                                    <div className="space-y-2">
-                                                                        <div className="flex items-center justify-between">
-                                                                            <Label className="text-xs">Barcodes</Label>
-                                                                            <Button type="button" variant="link" size="sm" onClick={() => addQuickBarcode(product.id, variant.id)} className="h-auto p-0 text-xs">
-                                                                                + Add Barcode
-                                                                            </Button>
-                                                                        </div>
-                                                                        {variant.barcodes.map((barcode, bIdx) => (
-                                                                            <div key={bIdx} className="flex items-center gap-2">
-                                                                                <Input value={barcode.barcode} onChange={(e) => updateQuickBarcode(product.id, variant.id, bIdx, 'barcode', e.target.value)} placeholder="Enter barcode" className="h-9 flex-1 font-mono" />
-                                                                                <div className="flex items-center space-x-1.5">
-                                                                                    <Checkbox checked={barcode.is_primary} onCheckedChange={(c) => updateQuickBarcode(product.id, variant.id, bIdx, 'is_primary', c)} />
-                                                                                    <Label className="text-xs text-muted-foreground">Primary</Label>
+                                        {expandedIds.has(product.id) &&
+                                            (product.variants?.length ?? 0) > 0 && (
+                                                <TableRow>
+                                                    <TableCell colSpan={8} className="bg-muted/20 p-0">
+                                                        <div className="px-6 py-3">
+                                                            <Table>
+                                                                <TableHeader>
+                                                                    <TableRow className="border-0 text-xs">
+                                                                        <TableHead className="h-8 pl-0">Variant</TableHead>
+                                                                        <TableHead className="h-8">SKU</TableHead>
+                                                                        <TableHead className="h-8">Unit</TableHead>
+                                                                        <TableHead className="h-8 text-right">MRP</TableHead>
+                                                                        <TableHead className="h-8 text-right">Selling</TableHead>
+                                                                        <TableHead className="h-8 text-right">Cost</TableHead>
+                                                                        <TableHead className="h-8">Images</TableHead>
+                                                                        <TableHead className="h-8 text-center">Active</TableHead>
+                                                                    </TableRow>
+                                                                </TableHeader>
+                                                                <TableBody>
+                                                                    {product.variants!.map((v) => (
+                                                                        <TableRow
+                                                                            key={v.id}
+                                                                            className="border-0 last:border-0"
+                                                                        >
+                                                                            <TableCell className="py-1.5 pl-0 text-sm font-medium">
+                                                                                {v.variant_name}
+                                                                            </TableCell>
+                                                                            <TableCell className="py-1.5 font-mono text-xs text-muted-foreground">
+                                                                                {v.sku}
+                                                                            </TableCell>
+                                                                            <TableCell className="py-1.5 text-xs">
+                                                                                {units.find(
+                                                                                    (u) => u.id === Number(v.unit_id),
+                                                                                )?.symbol ?? '—'}
+                                                                            </TableCell>
+                                                                            <TableCell className="py-1.5 text-right text-xs">
+                                                                                ₹{Number(v.mrp).toFixed(2)}
+                                                                            </TableCell>
+                                                                            <TableCell className="py-1.5 text-right text-xs">
+                                                                                ₹{Number(v.selling_price).toFixed(2)}
+                                                                            </TableCell>
+                                                                            <TableCell className="py-1.5 text-right text-xs">
+                                                                                ₹{Number(v.cost_price).toFixed(2)}
+                                                                            </TableCell>
+                                                                            <TableCell className="py-1.5">
+                                                                                <div
+                                                                                    className="flex gap-1"
+                                                                                    aria-label={`${v.images?.length ?? 0} images`}
+                                                                                >
+                                                                                    {v.images?.length ? (
+                                                                                        v.images.slice(0, 4).map((img) => (
+                                                                                            <Avatar
+                                                                                                key={img.id}
+                                                                                                className={`h-7 w-7 border-2 ${img.is_primary ? 'border-primary' : 'border-border'}`}
+                                                                                            >
+                                                                                                <AvatarImage
+                                                                                                    src={img.url}
+                                                                                                    alt={img.is_primary ? 'Primary image' : 'Product image'}
+                                                                                                />
+                                                                                                <AvatarFallback className="text-[8px]">
+                                                                                                    IMG
+                                                                                                </AvatarFallback>
+                                                                                            </Avatar>
+                                                                                        ))
+                                                                                    ) : (
+                                                                                        <span className="text-xs text-muted-foreground">
+                                                                                            —
+                                                                                        </span>
+                                                                                    )}
                                                                                 </div>
-                                                                                {variant.barcodes.length > 1 && (
-                                                                                    <Button variant="ghost" size="icon" onClick={() => removeQuickBarcode(product.id, variant.id, bIdx)} className="h-9 w-9">
-                                                                                        <X className="size-4" />
-                                                                                    </Button>
-                                                                                )}
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </CardContent>
-                                                            </Card>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    ))}
-                                </div>
+                                                                            </TableCell>
+                                                                            <TableCell className="py-1.5 text-center">
+                                                                                <div
+                                                                                    className={`mx-auto size-2 rounded-full ${v.status ? 'bg-green-500' : 'bg-muted-foreground/40'}`}
+                                                                                    aria-label={v.status ? 'Active' : 'Inactive'}
+                                                                                />
+                                                                            </TableCell>
+                                                                        </TableRow>
+                                                                    ))}
+                                                                </TableBody>
+                                                            </Table>
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            )}
+                                    </React.Fragment>
+                                ))
+                            ) : (
+                                <TableRow>
+                                    <TableCell colSpan={8} className="py-16 text-center text-muted-foreground">
+                                        <PackagePlus
+                                            className="mx-auto mb-2 size-8 opacity-20"
+                                            aria-hidden="true"
+                                        />
+                                        <p className="text-sm">
+                                            {searchQuery
+                                                ? `No products matching "${searchQuery}"`
+                                                : 'No products yet.'}
+                                        </p>
+                                    </TableCell>
+                                </TableRow>
                             )}
-                        </div>
-                    </Card>
+                        </TableBody>
+                    </Table>
 
-                    {quickProducts.length > 0 && (
-                        <div className="flex justify-end gap-3">
-                            <Button variant="outline" onClick={() => { setQuickProducts([]); setView('list'); }}>
-                                Cancel
-                            </Button>
-                            <Button onClick={handleQuickSubmit}>
-                                <Save className="mr-2 size-4" />
-                                Save All Products
-                            </Button>
-                        </div>
-                    )}
-                </div>
-            )}
+                    <Pagination data={products} />
+                </Card>
+            </div>
 
-            {editingProduct && (
-                <EditProductModal
-                    product={editingProduct}
+            {/* Create / Edit modal */}
+            {modalProduct !== null && (
+                <ProductFormModal
+                    product={modalProduct === 'new' ? null : modalProduct}
                     categories={categories}
                     brands={brands}
                     taxCategories={taxCategories}
                     units={units}
                     attributes={attributes}
-                    onClose={() => setEditingProduct(null)}
+                    onClose={() => setModalProduct(null)}
                 />
             )}
         </AppLayout>
-    );
+    )
 }

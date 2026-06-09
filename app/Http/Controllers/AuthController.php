@@ -60,10 +60,13 @@ class AuthController extends Controller
             }
 
             return match ($user->role) {
-                'admin'       => redirect()->route('admin.dashboard'),
-                'warehouse' => redirect()->route('warehouse.dashboard'),
-                'customer'    => redirect()->route('customer.dashboard'),
-                default       => redirect()->route('index'),
+                'admin'          => redirect()->route('admin.dashboard'),
+                'warehouse'      => redirect()->route('warehouse.dashboard'),
+                'manager'        => redirect()->route('manager.dashboard'),
+                'staff'          => redirect()->route('staff.dashboard'),
+                'delivery_agent' => redirect()->route('agent.dashboard'),
+                'customer'       => redirect()->route('customer.dashboard'),
+                default          => redirect()->route('home'),
             };
         }
 
@@ -82,6 +85,6 @@ class AuthController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect()->route('index');
+        return redirect()->route('home');
     }
 }

@@ -92,7 +92,7 @@ const SalesPOS = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {[1, 2, 3].map((i) => (
+                {[1, 2, 3]?.map((i) => (
                   <TableRow key={i} className="group hover:bg-emerald-50/50">
                     <TableCell className="py-3">
                       <div className="text-xs font-bold truncate max-w-[120px]">Coca Cola 330ml Can</div>
@@ -157,7 +157,7 @@ const SalesPOS = () => {
           </div>
           <ScrollArea className="flex-1 px-2 py-3">
             <div className="space-y-2">
-              {['All', 'Snacks', 'Drinks', 'Dairy', 'Bakery', 'Frozen', 'Health'].map((cat) => (
+              {['All', 'Snacks', 'Drinks', 'Dairy', 'Bakery', 'Frozen', 'Health']?.map((cat) => (
                 <Button key={cat} variant="ghost" className={`w-full h-auto py-4 flex flex-col gap-2 rounded-xl text-[10px] font-bold uppercase transition-all border-2 ${cat === 'All' ? 'bg-white border-emerald-500 text-emerald-700 shadow-md' : 'bg-transparent border-transparent hover:bg-white hover:border-slate-200'}`}>
                   <div className={`h-8 w-8 rounded-lg ${cat === 'All' ? 'bg-emerald-100' : 'bg-slate-200'}`} />
                   {cat}
@@ -181,7 +181,7 @@ const SalesPOS = () => {
 
           <ScrollArea className="flex-1 p-4">
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 content-start pb-10">
-              {Array.from({ length: 32 }).map((_, i) => (
+              {Array.from({ length: 32 })?.map((_, i) => (
                 <Card key={i} className="group cursor-pointer border-none shadow-sm hover:ring-2 hover:ring-emerald-500 transition-all active:scale-95 bg-white overflow-hidden">
                   <div className="aspect-square bg-slate-100 relative">
                      {/* Placeholder for Img */}

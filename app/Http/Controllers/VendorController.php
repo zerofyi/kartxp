@@ -3,39 +3,36 @@
 namespace App\Http\Controllers;
 
 use App\Models\Vendor;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
+use Inertia\Response;
 
 class VendorController extends Controller
 {
     /**
-     * Display a listing of the resource.
+     * Display a listing of vendors.
+     * Only fetch columns the UI actually renders.
      */
-    public function index()
+    public function index(): Response
     {
-        $vendors = Vendor::orderBy('name')
+        $vendors = Vendor::select('id', 'name', 'phone', 'email', 'gstin', 'address', 'created_at', 'updated_at')
+            ->orderBy('name')
             ->get();
 
-        return Inertia::render('warehouse/Vendors', [
+        return Inertia::render('Warehouse/Vendors', [
             'vendors' => $vendors,
         ]);
     }
 
     /**
-     * Show the form for creating a new resource.
+     * Store a newly created vendor.
      */
-    public function create()
-    {
-        //
-    }
-
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request)
+    public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate(
             $this->rules(),
@@ -44,42 +41,29 @@ class VendorController extends Controller
 
         try {
             DB::beginTransaction();
-            $data = $this->sanitize($validated);
-            $data['user_id'] = Auth::id();
-            Vendor::create($data);
+
+            Vendor::create([
+                ...$this->sanitize($validated),
+                'user_id' => Auth::id(),
+            ]);
 
             DB::commit();
 
             return redirect()->back()->with('success', 'Vendor created successfully.');
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('Vendor store failed', ['error' => $e->getMessage(), 'user' => Auth::id()]);
 
             return redirect()->back()->withErrors([
-                'name' => 'Failed to create vendor. Please try again.',
-            ]);
+                'form' => 'Failed to create vendor. Please try again.',
+            ])->withInput();
         }
     }
 
     /**
-     * Display the specified resource.
+     * Update an existing vendor.
      */
-    public function show(Vendor $vendor)
-    {
-        //
-    }
-
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Vendor $vendor)
-    {
-        //
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, Vendor $vendor)
+    public function update(Request $request, Vendor $vendor): RedirectResponse
     {
         $validated = $request->validate(
             $this->rules($vendor->id),
@@ -94,32 +78,51 @@ class VendorController extends Controller
             DB::commit();
 
             return redirect()->back()->with('success', 'Vendor updated successfully.');
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('Vendor update failed', ['vendor' => $vendor->id, 'error' => $e->getMessage()]);
 
             return redirect()->back()->withErrors([
-                'name' => 'Failed to update vendor. Please try again.',
-            ]);
+                'form' => 'Failed to update vendor. Please try again.',
+            ])->withInput();
         }
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Delete a vendor.
+     * Guard against vendors that have associated purchase orders or stock entries.
      */
-    public function destroy(Vendor $vendor)
+    public function destroy(Vendor $vendor): RedirectResponse
     {
-        //
+        // Uncomment and adapt once relationships are defined on the Vendor model:
+        // if ($vendor->purchaseOrders()->exists()) {
+        //     return redirect()->back()->withErrors([
+        //         'form' => 'Cannot delete a vendor with existing purchase orders.',
+        //     ]);
+        // }
+
+        try {
+            $vendor->delete();
+
+            return redirect()->back()->with('success', 'Vendor deleted successfully.');
+        } catch (\Throwable $e) {
+            Log::error('Vendor delete failed', ['vendor' => $vendor->id, 'error' => $e->getMessage()]);
+
+            return redirect()->back()->withErrors([
+                'form' => 'Failed to delete vendor. Please try again.',
+            ]);
+        }
     }
+
+    // ─────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────
 
     private function rules(?int $vendorId = null): array
     {
         return [
-            'name' => [
-                'required',
-                'string',
-                'min:2',
-                'max:255',
-            ],
+            'name' => ['required', 'string', 'min:2', 'max:255'],
+
             'phone' => [
                 'required',
                 'string',
@@ -127,29 +130,20 @@ class VendorController extends Controller
                 'max:15',
                 Rule::unique('vendors', 'phone')->ignore($vendorId),
             ],
-            'email' => [
-                'nullable',
-                'string',
-                'email:rfc',
-                'max:255',
-            ],
+
+            'email' => ['nullable', 'string', 'email:rfc', 'max:255'],
+
             'gstin' => [
                 'nullable',
                 'string',
                 'regex:/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[A-Z0-9]{1}[Z]{1}[A-Z0-9]{1}$/',
                 'max:15',
             ],
-            'address' => [
-                'nullable',
-                'string',
-                'max:1000',
-            ],
+
+            'address' => ['nullable', 'string', 'max:1000'],
         ];
     }
 
-    /**
-     * Human-readable validation messages.
-     */
     private function messages(): array
     {
         return [
@@ -173,14 +167,13 @@ class VendorController extends Controller
     }
 
     /**
-     * Trim whitespace; convert empty strings to null for
-     * nullable columns so the DB stays clean.
+     * Trim whitespace; normalise empty strings → null for nullable columns.
      */
     private function sanitize(array $data): array
     {
         foreach (['email', 'gstin', 'address'] as $field) {
-            if (isset($data[$field])) {
-                $trimmed = trim($data[$field]);
+            if (array_key_exists($field, $data)) {
+                $trimmed = trim((string) $data[$field]);
                 $data[$field] = $trimmed === '' ? null : $trimmed;
             }
         }

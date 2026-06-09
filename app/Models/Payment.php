@@ -15,11 +15,21 @@ class Payment extends Model
         'method',
         'type',
         'reference_no',
+        'gateway',
+        'transaction_id',
+        'gateway_order_id',
+        'status',
+        'payload',
     ];
 
     protected $casts = [
-        'amount' => 'decimal:2',
+        'amount'  => 'decimal:2',
+        'payload' => 'array',
     ];
+
+    // -----------------------------------------------------------------------
+    // Relationships
+    // -----------------------------------------------------------------------
 
     public function order(): BelongsTo
     {

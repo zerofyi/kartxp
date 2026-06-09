@@ -3,235 +3,287 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
+use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class CategoryController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    private const IMAGE_FOLDER = 'Category/images';
+    private const ICON_FOLDER  = 'Category/icons';
+    private const PER_PAGE     = 10;
+
+    public function __construct(protected ImageUploadService $imageUploadService) {}
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    private function currentWarehouse()
     {
-        $categories = Category::with('parent')
-            ->orderBy('sort_order')
-            ->get();
+        $warehouse = Auth::user()->currentWarehouse();
 
-        $parentCategories = Category::whereNull('parent_id')
-            ->where('status', true)
-            ->orderBy('sort_order')
-            ->get();
+        abort_if(! $warehouse, 403, 'No active warehouse selected.');
 
-        return Inertia::render('warehouse/Category', [
+        return $warehouse;
+    }
+
+    private function resolveUrl(?string $path): ?string
+    {
+        return $path ? Storage::disk('public_html')->url($path) : null;
+    }
+
+    private function formatCategory(Category $category): array
+    {
+        return [
+            'id'          => $category->id,
+            'name'        => $category->name,
+            'slug'        => $category->slug,
+            'status'      => $category->status,
+            'sort_order'  => $category->sort_order,
+            'parent_id'   => $category->parent_id,
+            'parent_name' => $category->parent?->name,
+            'image_url'   => $this->resolveUrl($category->image_path),
+            'icon_url'    => $this->resolveUrl($category->icon_path),
+        ];
+    }
+
+    // -----------------------------------------------------------------------
+    // Index
+    // -----------------------------------------------------------------------
+
+    public function index(Request $request)
+    {
+        $warehouse = $this->currentWarehouse();
+        $search    = $request->string('search')->trim();
+
+        $categories = Category::query()
+            ->with('parent:id,name')
+            ->where('warehouse_id', $warehouse->id)
+            ->when($search, fn ($q) => $q->where('name', 'like', "%{$search}%"))
+            ->latest()
+            ->paginate(self::PER_PAGE)
+            ->withQueryString()
+            ->through(fn ($category) => $this->formatCategory($category));
+
+        // Flat list of active parent candidates for the dropdown
+        $parents = Category::query()
+            ->select('id', 'name', 'slug')
+            ->where('warehouse_id', $warehouse->id)
+            ->whereNull('parent_id')
+            ->active()
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($c) => ['id' => $c->id, 'name' => $c->name, 'slug' => $c->slug]);
+
+        return Inertia::render('Warehouse/Category', [
             'categories' => $categories,
-            'parentCategories' => $parentCategories,
+            'parents'    => $parents,
+            'filters'    => ['search' => (string) $search],
         ]);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
+    // -----------------------------------------------------------------------
+    // Store
+    // -----------------------------------------------------------------------
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
+        $warehouse = $this->currentWarehouse();
+
         $validated = $request->validate([
-            'name' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('categories', 'name')
-                    ->where(function ($query) use ($request) {
-                        return $query->where('parent_id', $request->parent_id);
-                    }),
-            ],
-            'parent_id' => [
-                'nullable',
-                'exists:categories,id',
-            ],
-            'sort_order' => [
-                'required',
-                'integer',
-                'min:0',
-            ],
-            'status' => [
-                'required',
-                'boolean',
-            ],
-        ], [
-            'name.required' => 'Category name is required.',
-            'name.max' => 'Category name cannot exceed 255 characters.',
-            'name.unique' => 'A category with this name already exists under the same parent.',
-            'parent_id.exists' => 'The selected parent category does not exist.',
-            'sort_order.required' => 'Sort order is required.',
-            'sort_order.integer' => 'Sort order must be a number.',
-            'sort_order.min' => 'Sort order must be at least 0.',
-            'status.required' => 'Status is required.',
-            'status.boolean' => 'Status must be true or false.',
+            'name'       => ['required', 'string', 'max:255'],
+            'parent_id'  => ['nullable', 'integer', 'exists:categories,id'],
+            'sort_order' => ['nullable', 'integer', 'min:0'],
+            'status'     => ['nullable', 'boolean'],
+            'image'      => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'icon'       => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp,svg', 'max:1024'],
         ]);
 
-        try {
-            DB::beginTransaction();
+        DB::beginTransaction();
 
-            // Validate parent category doesn't create circular reference
-            if ($validated['parent_id']) {
-                $parentCategory = Category::find($validated['parent_id']);
-                if (!$parentCategory) {
-                    return back()->withErrors([
-                        'parent_id' => 'The selected parent category does not exist.',
-                    ]);
+        $imagePath = null;
+        $iconPath  = null;
+
+        try {
+            $slug = $this->uniqueSlug($validated['name'], $warehouse->id);
+
+            if ($request->hasFile('image')) {
+                $imagePath = $this->imageUploadService->upload(
+                    file:   $request->file('image'),
+                    slug:   $slug,
+                    folder: self::IMAGE_FOLDER,
+                );
+
+                if (! $imagePath) {
+                    throw new \RuntimeException('Category image upload failed.');
                 }
             }
 
-            $category = Category::create($validated);
+            if ($request->hasFile('icon')) {
+                $iconPath = $this->imageUploadService->upload(
+                    file:   $request->file('icon'),
+                    slug:   "{$slug}_icon",
+                    folder: self::ICON_FOLDER,
+                );
+
+                if (! $iconPath) {
+                    throw new \RuntimeException('Category icon upload failed.');
+                }
+            }
+
+            Category::create([
+                'name'         => $validated['name'],
+                'slug'         => $slug,
+                'parent_id'    => $validated['parent_id'] ?? null,
+                'sort_order'   => $validated['sort_order'] ?? 0,
+                'status'       => $validated['status'] ?? true,
+                'image_path'   => $imagePath,
+                'icon_path'    => $iconPath,
+                'warehouse_id' => $warehouse->id,
+            ]);
 
             DB::commit();
 
-            return back()->with('success', 'Category created successfully.');
+            return redirect()->back()->with('success', 'Category created successfully.');
+
         } catch (\Exception $e) {
             DB::rollBack();
+            $this->cleanupFiles($imagePath, $iconPath);
+            logger()->error('Category store failed', ['error' => $e->getMessage()]);
 
-            return back()->withErrors([
-                'error' => 'Failed to create category. Please try again.',
-            ])->withInput();
+            return redirect()->back()->withErrors([
+                'error' => 'Something went wrong while creating the category.',
+            ]);
         }
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(Category $category)
-    {
-        //
-    }
+    // -----------------------------------------------------------------------
+    // Update
+    // -----------------------------------------------------------------------
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Category $category)
-    {
-        //
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, Category $category)
     {
+        $warehouse = $this->currentWarehouse();
+
+        abort_if($category->warehouse_id !== $warehouse->id, 403);
+
         $validated = $request->validate([
-            'name' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('categories', 'name')
-                    ->where(function ($query) use ($request) {
-                        return $query->where('parent_id', $request->parent_id);
-                    })
-                    ->ignore($category->id),
-            ],
-            'parent_id' => [
-                'nullable',
-                'exists:categories,id',
-                function ($attribute, $value, $fail) use ($category) {
-                    if ($value == $category->id) {
-                        $fail('A category cannot be its own parent.');
-                    }
-                },
-            ],
-            'sort_order' => [
-                'required',
-                'integer',
-                'min:0',
-            ],
-            'status' => [
-                'required',
-                'boolean',
-            ],
-        ], [
-            'name.required' => 'Category name is required.',
-            'name.max' => 'Category name cannot exceed 255 characters.',
-            'name.unique' => 'A category with this name already exists under the same parent.',
-            'parent_id.exists' => 'The selected parent category does not exist.',
-            'sort_order.required' => 'Sort order is required.',
-            'sort_order.integer' => 'Sort order must be a number.',
-            'sort_order.min' => 'Sort order must be at least 0.',
-            'status.required' => 'Status is required.',
-            'status.boolean' => 'Status must be true or false.',
+            'name'       => ['required', 'string', 'max:255'],
+            'parent_id'  => ['nullable', 'integer', 'exists:categories,id'],
+            'sort_order' => ['nullable', 'integer', 'min:0'],
+            'status'     => ['nullable', 'boolean'],
+            'image'      => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'icon'       => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp,svg', 'max:1024'],
         ]);
 
+        // Prevent a category from being its own parent
+        if (! empty($validated['parent_id']) && $validated['parent_id'] === $category->id) {
+            return redirect()->back()->withErrors(['parent_id' => 'A category cannot be its own parent.']);
+        }
+
+        DB::beginTransaction();
+
+        $newImagePath = null;
+        $newIconPath  = null;
+
         try {
-            DB::beginTransaction();
+            $slug = $this->uniqueSlug($validated['name'], $warehouse->id, $category->id);
 
-            // Prevent circular parent-child relationships
-            if ($validated['parent_id']) {
-                if ($this->wouldCreateCircularReference($category->id, $validated['parent_id'])) {
-                    return back()->withErrors([
-                        'parent_id' => 'Cannot set this parent as it would create a circular reference.',
-                    ]);
+            if ($request->hasFile('image')) {
+                $newImagePath = $this->imageUploadService->upload(
+                    file:   $request->file('image'),
+                    slug:   $slug,
+                    folder: self::IMAGE_FOLDER,
+                );
+
+                if (! $newImagePath) {
+                    throw new \RuntimeException('Category image upload failed.');
                 }
+
+                $this->deleteFileIfExists($category->image_path);
+                $category->image_path = $newImagePath;
             }
 
-            // If deactivating a category with active children, warn or handle
-            if (!$validated['status']) {
-                $activeChildrenCount = Category::where('parent_id', $category->id)
-                    ->where('status', true)
-                    ->count();
+            if ($request->hasFile('icon')) {
+                $newIconPath = $this->imageUploadService->upload(
+                    file:   $request->file('icon'),
+                    slug:   "{$slug}_icon",
+                    folder: self::ICON_FOLDER,
+                );
 
-                if ($activeChildrenCount > 0) {
-                    // Optional: You might want to deactivate children too
-                    // or just warn the user
-                    Category::where('parent_id', $category->id)
-                        ->update(['status' => false]);
+                if (! $newIconPath) {
+                    throw new \RuntimeException('Category icon upload failed.');
                 }
+
+                $this->deleteFileIfExists($category->icon_path);
+                $category->icon_path = $newIconPath;
             }
 
-            $category->update($validated);
+            $category->name       = $validated['name'];
+            $category->slug       = $slug;
+            $category->parent_id  = $validated['parent_id'] ?? null;
+            $category->sort_order = $validated['sort_order'] ?? $category->sort_order;
+            $category->status     = $validated['status'] ?? $category->status;
+            $category->save();
 
             DB::commit();
 
-            return back()->with('success', 'Category updated successfully.');
+            return redirect()->back()->with('success', 'Category updated successfully.');
+
         } catch (\Exception $e) {
             DB::rollBack();
+            $this->cleanupFiles($newImagePath, $newIconPath);
+            logger()->error('Category update failed', ['category_id' => $category->id, 'error' => $e->getMessage()]);
 
-            return back()->withErrors([
-                'error' => 'Failed to update category. Please try again.',
-            ])->withInput();
+            return redirect()->back()->withErrors([
+                'error' => 'Something went wrong while updating the category.',
+            ]);
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Private utilities
+    // -----------------------------------------------------------------------
+
     /**
-     * Check if setting a new parent would create a circular reference
+     * Generate a unique slug within the warehouse scope.
+     * Appends -2, -3, … if the base slug is already taken (excluding $exceptId).
      */
-    private function wouldCreateCircularReference(int $categoryId, int $newParentId): bool
+    private function uniqueSlug(string $name, int $warehouseId, ?int $exceptId = null): string
     {
-        $currentParentId = $newParentId;
+        $base    = Str::slug($name);
+        $slug    = $base;
+        $counter = 2;
 
-        // Traverse up the parent chain
-        while ($currentParentId !== null) {
-            if ($currentParentId === $categoryId) {
-                return true; // Circular reference detected
-            }
-
-            $parent = Category::find($currentParentId);
-            $currentParentId = $parent ? $parent->parent_id : null;
+        while (
+            Category::where('slug', $slug)
+                ->where('warehouse_id', $warehouseId)
+                ->when($exceptId, fn ($q) => $q->where('id', '!=', $exceptId))
+                ->exists()
+        ) {
+            $slug = "{$base}-{$counter}";
+            $counter++;
         }
 
-        return false;
+        return $slug;
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Category $category)
+    private function deleteFileIfExists(?string $path): void
     {
-        //
+        if ($path && Storage::disk('public_html')->exists($path)) {
+            Storage::disk('public_html')->delete($path);
+        }
+    }
+
+    private function cleanupFiles(?string ...$paths): void
+    {
+        foreach ($paths as $path) {
+            $this->deleteFileIfExists($path);
+        }
     }
 }

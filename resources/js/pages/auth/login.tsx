@@ -39,7 +39,7 @@ export default function Login({
                     <>
                         <div className="grid gap-6">
                             <div className="grid gap-2">
-                                <Label htmlFor="login">Email address</Label>
+                                <Label htmlFor="login">Email or Phone</Label>
                                 <Input
                                     id="login"
                                     type="text"

@@ -1,29 +1,17 @@
 import { Head } from '@inertiajs/react';
-import React from 'react';
+import React, { useMemo } from 'react';
 
 // ─────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────
-type Customer = {
-    id: number;
-    name: string;
-    phone: string;
-    address?: string;
-};
+type Customer = { id: number; name: string; phone: string; address?: string };
 
-type TaxCategory = {
-    name: string;
-    tax_percent: number;
-    type: string;
-};
+type TaxCategory = { name: string; tax_percent: number; type: 'inclusive' | 'exclusive' };
 
 type OrderItem = {
     id: number;
     product_variant: {
-        product: {
-            name: string;
-            tax_category: TaxCategory;
-        };
+        product: { name: string; tax_category: TaxCategory };
         variant_name: string;
         sku: string;
         unit: { symbol: string };
@@ -34,13 +22,9 @@ type OrderItem = {
     tax_percent: number;
 };
 
-type Payment = {
-    id: number;
-    method: string;
-    amount: number;
-};
+type Payment = { id: number; method: string; amount: number };
 
-type Sale = {
+type Order = {
     id: number;
     order_number: string;
     customer?: Customer;
@@ -53,70 +37,87 @@ type Sale = {
     created_at: string;
 };
 
-type Props = {
-    order: Sale;
+type Props = { order: Order };
+
+// ─────────────────────────────────────────────
+// Helpers (stable – defined outside component)
+// ─────────────────────────────────────────────
+function calcItemTotal(item: OrderItem): number {
+    const taxType = item.product_variant.product.tax_category.type;
+    const gross   = item.quantity * item.price - item.discount;
+    if (taxType === 'inclusive') return Math.max(0, gross);
+    const base = Math.max(0, gross);
+    return base + base * item.tax_percent / 100;
+}
+
+function calcDiscountPercent(item: OrderItem): number {
+    const subtotal = item.quantity * item.price;
+    return subtotal > 0 ? (item.discount / subtotal) * 100 : 0;
+}
+
+/** Indian number-to-words (handles up to crores) */
+function numberToWords(num: number): string {
+    const ones  = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'];
+    const teens = ['TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN',
+                   'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'];
+    const tens  = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
+
+    const n = Math.floor(num);
+    if (n === 0)           return 'ZERO';
+    if (n < 10)            return ones[n];
+    if (n < 20)            return teens[n - 10];
+    if (n < 100)           return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+    if (n < 1_000)         return ones[Math.floor(n / 100)] + ' HUNDRED' + (n % 100 ? ' ' + numberToWords(n % 100) : '');
+    if (n < 1_00_000)      return numberToWords(Math.floor(n / 1_000)) + ' THOUSAND' + (n % 1_000 ? ' ' + numberToWords(n % 1_000) : '');
+    if (n < 1_00_00_000)   return numberToWords(Math.floor(n / 1_00_000)) + ' LAKH' + (n % 1_00_000 ? ' ' + numberToWords(n % 1_00_000) : '');
+    return 'AMOUNT TOO LARGE';
+}
+
+// ─────────────────────────────────────────────
+// Shared inline styles
+// ─────────────────────────────────────────────
+const S = {
+    divSolid:  { borderBottom: '2px solid #000', marginBottom: '0' } as React.CSSProperties,
+    divDashed: { borderBottom: '1px dashed #000' } as React.CSSProperties,
+    row:       { display: 'flex', justifyContent: 'space-between', padding: '1px 0' } as React.CSSProperties,
+    cell:      (align: 'left' | 'right', w: string): React.CSSProperties => ({ textAlign: align, width: w, padding: '0 1px' }),
 };
 
+// ─────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────
 export default function Invoice({ order }: Props) {
-    const calculateItemTotal = (item: OrderItem) => {
-        const subtotal = Number(item.quantity) * Number(item.price);
-        const afterDiscount = subtotal - Number(item.discount);
-        const taxType = item.product_variant.product.tax_category.type;
 
-        if (taxType === 'inclusive') {
-            return afterDiscount;
-        } else {
-            const tax = (afterDiscount * Number(item.tax_percent)) / 100;
-            return afterDiscount + tax;
-        }
-    };
+    const totalPaid = useMemo(
+        () => order.payments.reduce((s, p) => s + Number(p.amount), 0),
+        [order.payments]
+    );
 
-    const calculateCGST = () => Number(order.tax_amount) / 2;
-    const calculateSGST = () => Number(order.tax_amount) / 2;
+    const pendingAmount = useMemo(
+        () => Math.max(0, Number(order.total_amount) - totalPaid),
+        [order.total_amount, totalPaid]
+    );
 
-    const totalPaid = order.payments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const pendingAmount = Number(order.total_amount) - totalPaid;
-    const balanceAmount = 0;
+    const cgst = Number(order.tax_amount) / 2;
+    const sgst = cgst;
 
-    const numberToWords = (num: number): string => {
-        const ones = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'];
-        const teens = ['TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'];
-        const tens = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
+    const amountInWords = useMemo(
+        () => numberToWords(Number(order.total_amount)),
+        [order.total_amount]
+    );
 
-        if (num === 0) return 'ZERO';
-        const amount = Math.floor(num);
-        if (amount < 10) return ones[amount];
-        if (amount < 20) return teens[amount - 10];
-        if (amount < 100) return tens[Math.floor(amount / 10)] + (amount % 10 ? ' ' + ones[amount % 10] : '');
-        if (amount < 1000) return ones[Math.floor(amount / 100)] + ' HUNDRED' + (amount % 100 ? ' ' + numberToWords(amount % 100) : '');
-        if (amount < 100000) {
-            const thousands = Math.floor(amount / 1000);
-            const remainder = amount % 1000;
-            return numberToWords(thousands) + ' THOUSAND' + (remainder ? ' ' + numberToWords(remainder) : '');
-        }
-        if (amount < 10000000) {
-            const lakhs = Math.floor(amount / 100000);
-            const remainder = amount % 100000;
-            return numberToWords(lakhs) + ' LAKH' + (remainder ? ' ' + numberToWords(remainder) : '');
-        }
-        return 'AMOUNT TOO LARGE';
-    };
+    // UPI QR – encode once
+    const qrUrl = useMemo(() => {
+        const upiData = encodeURIComponent(
+            `upi://pay?pa=merchant@upi&pn=GhorerBazar&am=${Number(order.total_amount).toFixed(2)}&cu=INR`
+        );
+        return `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${upiData}`;
+    }, [order.total_amount]);
 
-    // ── Shared inline styles ──────────────────────────────────────────
-    const dividerSolid: React.CSSProperties = {
-        borderBottom: '2px solid #000',
-        marginBottom: '0',
-    };
-
-    const dividerDashed: React.CSSProperties = {
-        borderBottom: '1px dashed #000',
-    };
-
-    const row: React.CSSProperties = {
-        display: 'flex',
-        justifyContent: 'space-between',
-        padding: '1px 0',
-    };
+    const dateStr = new Date(order.created_at).toLocaleDateString('en-GB');
+    const timeStr = new Date(order.created_at)
+        .toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+        .toUpperCase();
 
     return (
         <>
@@ -129,109 +130,75 @@ export default function Invoice({ order }: Props) {
                     margin: '0 auto',
                     backgroundColor: '#ffffff',
                     color: '#000000',
-                    // fontFamily: '"Courier New", Courier, monospace',
-                    // fontFamily: '"Tahoma", "Arial", sans-serif',
                     fontSize: '11px',
                     padding: '4px 4px 2px 4px',
                     lineHeight: '1.4',
                 }}
             >
-                {/* ── Header ──────────────────────────────────────────── */}
-                <div style={{ ...dividerSolid, textAlign: 'center', paddingBottom: '6px', marginBottom: '4px' }}>
-                    <div style={{ fontSize: '16px', fontWeight: '900', letterSpacing: '2px', lineHeight: '1.2' }}>
+                {/* ── Header ──────────────────────────────────── */}
+                <div style={{ ...S.divSolid, textAlign: 'center', paddingBottom: '6px', marginBottom: '4px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '2px', lineHeight: '1.2' }}>
                         GHORER BAZAR
                     </div>
-                    <div style={{ fontSize: '9px', fontWeight: '700', marginTop: '2px', lineHeight: '1.5' }}>
+                    <div style={{ fontSize: '9px', fontWeight: 700, marginTop: '2px', lineHeight: 1.5 }}>
                         SADIKHANS DEARH, JALANGI, WEST BENGAL - 742303
                     </div>
-                    <div style={{ fontSize: '9px', fontWeight: '700', lineHeight: '1.5' }}>
-                        GSTIN: 19HBPPB98261Z0
-                    </div>
-                    <div style={{ fontSize: '9px', fontWeight: '700', lineHeight: '1.5' }}>
-                        E-mail: info@kartxp.com
-                    </div>
+                    <div style={{ fontSize: '9px', fontWeight: 700, lineHeight: 1.5 }}>GSTIN: 19HBPPB98261Z0</div>
+                    <div style={{ fontSize: '9px', fontWeight: 700, lineHeight: 1.5 }}>E-mail: info@kartxp.com</div>
                 </div>
 
-                {/* ── Bill Info ────────────────────────────────────────── */}
-                <div style={{ ...dividerDashed, paddingBottom: '4px', marginBottom: '4px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', fontWeight: '700' }}>
-                        <span>
-                            Dt: {new Date(order.created_at).toLocaleDateString('en-GB')}
-                        </span>
-                        <span>
-                            {new Date(order.created_at)
-                                .toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-                                .toUpperCase()}
-                        </span>
+                {/* ── Bill info ───────────────────────────────── */}
+                <div style={{ ...S.divDashed, paddingBottom: '4px', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', fontWeight: 700 }}>
+                        <span>Dt: {dateStr}</span>
+                        <span>{timeStr}</span>
                         <span>Bill#: {order.order_number}</span>
                     </div>
                 </div>
 
-                {/* ── Customer Info ────────────────────────────────────── */}
-                <div style={{ ...dividerDashed, paddingBottom: '4px', marginBottom: '4px', fontSize: '9px', fontWeight: '700' }}>
+                {/* ── Customer ────────────────────────────────── */}
+                <div style={{ ...S.divDashed, paddingBottom: '4px', marginBottom: '4px', fontSize: '9px', fontWeight: 700 }}>
                     <div>Bill To: {order.customer ? order.customer.name.toUpperCase() : 'CASH CUSTOMER'}</div>
-                    {order.customer && (
-                        <>
-                            {order.customer.address && (
-                                <div>Addr: {order.customer.address}</div>
-                            )}
-                            <div>Ph: {order.customer.phone}</div>
-                        </>
-                    )}
+                    {order.customer?.address && <div>Addr: {order.customer.address}</div>}
+                    {order.customer?.phone    && <div>Ph: {order.customer.phone}</div>}
                 </div>
 
-                {/* ── Items Table Header ───────────────────────────────── */}
-                <div
-                    style={{
-                        ...dividerSolid,
-                        borderTop: '2px solid #000',
-                        fontSize: '9px',
-                        fontWeight: '900',
-                        paddingTop: '3px',
-                        paddingBottom: '3px',
-                        marginBottom: '0',
-                    }}
-                >
+                {/* ── Items header ─────────────────────────────── */}
+                <div style={{ ...S.divSolid, borderTop: '2px solid #000', fontSize: '9px', fontWeight: 900, padding: '3px 0', marginBottom: 0 }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                             <tr>
-                                <th style={{ textAlign: 'left',  width: '5%',  padding: '0 1px' }}>#</th>
-                                <th style={{ textAlign: 'left',  width: '33%', padding: '0 1px' }}>ITEM</th>
-                                <th style={{ textAlign: 'right', width: '11%', padding: '0 1px' }}>QTY</th>
-                                <th style={{ textAlign: 'right', width: '12%', padding: '0 1px' }}>MRP</th>
-                                <th style={{ textAlign: 'right', width: '12%', padding: '0 1px' }}>RATE</th>
-                                <th style={{ textAlign: 'right', width: '10%', padding: '0 1px' }}>DIS%</th>
-                                <th style={{ textAlign: 'right', width: '17%', padding: '0 1px' }}>AMT</th>
+                                <th style={S.cell('left',  '5%')}>#</th>
+                                <th style={S.cell('left',  '33%')}>ITEM</th>
+                                <th style={S.cell('right', '11%')}>QTY</th>
+                                <th style={S.cell('right', '12%')}>MRP</th>
+                                <th style={S.cell('right', '12%')}>RATE</th>
+                                <th style={S.cell('right', '10%')}>DIS%</th>
+                                <th style={S.cell('right', '17%')}>AMT</th>
                             </tr>
                         </thead>
                     </table>
                 </div>
 
-                {/* ── Items ────────────────────────────────────────────── */}
-                <div style={{ ...dividerDashed, marginBottom: '4px' }}>
+                {/* ── Items ───────────────────────────────────── */}
+                <div style={{ ...S.divDashed, marginBottom: '4px' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <tbody>
-                            {order.items.map((item, index) => {
-                                const itemTotal = calculateItemTotal(item);
-                                const itemSubtotal = Number(item.quantity) * Number(item.price);
-                                const discountPercent =
-                                    itemSubtotal > 0
-                                        ? (Number(item.discount) / itemSubtotal) * 100
-                                        : 0;
+                            {order.items.map((item, idx) => {
+                                const itemTotal      = calcItemTotal(item);
+                                const discountPct    = calcDiscountPercent(item);
 
                                 return (
                                     <React.Fragment key={item.id}>
-                                        {/* Main item row */}
-                                        <tr style={{ fontSize: '9px', fontWeight: '700' }}>
-                                            <td style={{ padding: '2px 1px', verticalAlign: 'top', width: '5%' }}>
-                                                {index + 1}
-                                            </td>
+                                        <tr style={{ fontSize: '9px', fontWeight: 700 }}>
+                                            <td style={{ padding: '2px 1px', verticalAlign: 'top', width: '5%' }}>{idx + 1}</td>
                                             <td style={{ padding: '2px 1px', verticalAlign: 'top', width: '33%', wordBreak: 'break-word' }}>
                                                 {item.product_variant.product.name}
                                             </td>
                                             <td style={{ padding: '2px 1px', textAlign: 'right', verticalAlign: 'top', width: '11%' }}>
                                                 {Number(item.quantity).toFixed(2)}
                                             </td>
+                                            {/* MRP column – show price as MRP (extend model to carry mrp if needed) */}
                                             <td style={{ padding: '2px 1px', textAlign: 'right', verticalAlign: 'top', width: '12%' }}>
                                                 {Number(item.price).toFixed(2)}
                                             </td>
@@ -239,21 +206,21 @@ export default function Invoice({ order }: Props) {
                                                 {Number(item.price).toFixed(2)}
                                             </td>
                                             <td style={{ padding: '2px 1px', textAlign: 'right', verticalAlign: 'top', width: '10%' }}>
-                                                {discountPercent.toFixed(2)}
+                                                {discountPct.toFixed(2)}
                                             </td>
                                             <td style={{ padding: '2px 1px', textAlign: 'right', verticalAlign: 'top', width: '17%' }}>
                                                 {itemTotal.toFixed(2)}
                                             </td>
                                         </tr>
-                                        {/* Sub-row: variant / unit / gst / disc */}
-                                        <tr style={{ fontSize: '8px', fontWeight: '700' }}>
-                                            <td></td>
+                                        {/* Sub-row */}
+                                        <tr style={{ fontSize: '8px', fontWeight: 700 }}>
+                                            <td />
                                             <td colSpan={3} style={{ padding: '0 1px 4px 1px' }}>
                                                 {item.product_variant.variant_name}
                                             </td>
                                             <td colSpan={2} style={{ padding: '0 1px 4px 1px' }}>
-                                                {/* {item.product_variant.unit.symbol} */}
                                                 GST:{Number(item.tax_percent).toFixed(0)}%
+                                                {item.product_variant.product.tax_category.type === 'inclusive' ? ' (I)' : ' (E)'}
                                             </td>
                                             <td style={{ padding: '0 1px 4px 1px', textAlign: 'right' }}>
                                                 -{Number(item.discount).toFixed(2)}
@@ -266,94 +233,60 @@ export default function Invoice({ order }: Props) {
                     </table>
                 </div>
 
-                {/* ── Summary ──────────────────────────────────────────── */}
-                <div style={{ ...dividerDashed, paddingBottom: '4px', marginBottom: '4px', fontSize: '9px', fontWeight: '700' }}>
-                    <div style={row}>
-                        <span>Sub Total</span>
-                        <span>{Number(order.subtotal).toFixed(2)}</span>
-                    </div>
-                    <div style={row}>
-                        <span>Taxable Amount</span>
-                        <span>{Number(order.subtotal).toFixed(2)}</span>
-                    </div>
-                    <div style={row}>
-                        <span>CGST Amount</span>
-                        <span>{calculateCGST().toFixed(2)}</span>
-                    </div>
-                    <div style={row}>
-                        <span>SGST Amount</span>
-                        <span>{calculateSGST().toFixed(2)}</span>
-                    </div>
+                {/* ── Summary ─────────────────────────────────── */}
+                <div style={{ ...S.divDashed, paddingBottom: '4px', marginBottom: '4px', fontSize: '9px', fontWeight: 700 }}>
+                    <div style={S.row}><span>Sub Total</span><span>{Number(order.subtotal).toFixed(2)}</span></div>
+                    <div style={S.row}><span>Taxable Amount</span><span>{Number(order.subtotal).toFixed(2)}</span></div>
+                    <div style={S.row}><span>CGST Amount</span><span>{cgst.toFixed(2)}</span></div>
+                    <div style={S.row}><span>SGST Amount</span><span>{sgst.toFixed(2)}</span></div>
                     {Number(order.discount_amount) > 0 && (
-                        <div style={row}>
-                            <span>Discount</span>
-                            <span>-{Number(order.discount_amount).toFixed(2)}</span>
-                        </div>
+                        <div style={S.row}><span>Discount</span><span>-{Number(order.discount_amount).toFixed(2)}</span></div>
                     )}
                 </div>
 
-                {/* ── Total Amount ─────────────────────────────────────── */}
-                <div
-                    style={{
-                        borderTop: '2px solid #000',
-                        borderBottom: '2px solid #000',
-                        padding: '4px 0',
-                        marginBottom: '4px',
-                    }}
-                >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: '900' }}>
+                {/* ── Total ───────────────────────────────────── */}
+                <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '4px 0', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 900 }}>
                         <span>TOTAL AMOUNT</span>
                         <span>Rs.{Number(order.total_amount).toFixed(2)}</span>
                     </div>
                 </div>
 
-                {/* ── Amount in Words ──────────────────────────────────── */}
-                <div style={{ ...dividerDashed, paddingBottom: '4px', marginBottom: '4px', textAlign: 'center', fontSize: '9px', fontWeight: '700' }}>
-                    <div style={{ fontWeight: '900', marginBottom: '2px', letterSpacing: '0.5px' }}>
-                        ** RUPEES IN WORDS **
-                    </div>
-                    <div>{numberToWords(Number(order.total_amount))} ONLY</div>
+                {/* ── Amount in words ──────────────────────────── */}
+                <div style={{ ...S.divDashed, paddingBottom: '4px', marginBottom: '4px', textAlign: 'center', fontSize: '9px', fontWeight: 700 }}>
+                    <div style={{ fontWeight: 900, marginBottom: '2px', letterSpacing: '0.5px' }}>** RUPEES IN WORDS **</div>
+                    <div>{amountInWords} ONLY</div>
                 </div>
 
-                {/* ── QR Code + Payment Details ────────────────────────── */}
-                <div style={{ ...dividerDashed, paddingBottom: '4px', marginBottom: '4px' }}>
+                {/* ── QR + Payment ─────────────────────────────── */}
+                <div style={{ ...S.divDashed, paddingBottom: '4px', marginBottom: '4px' }}>
                     <table style={{ width: '100%' }}>
                         <tbody>
                             <tr>
-                                {/* QR */}
                                 <td style={{ width: '42%', verticalAlign: 'top', textAlign: 'center', paddingRight: '4px' }}>
-                                    {/* <div style={{ fontSize: '8px', fontWeight: '900', marginBottom: '2px' }}>SCAN & PAY</div> */}
                                     <img
-                                        src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=upi://pay?pa=merchant@upi%26pn=GhorerBazar%26am=${Number(order.total_amount).toFixed(2)}%26cu=INR`}
-                                        alt="Payment QR"
-                                        style={{ width: '85px', height: '85px', display: 'block', margin: '0 auto' }}
+                                        src={qrUrl}
+                                        alt="UPI Payment QR"
+                                        width={85}
+                                        height={85}
+                                        style={{ display: 'block', margin: '0 auto' }}
+                                        loading="eager"
                                     />
                                 </td>
-
-                                {/* Payment breakdown */}
-                                <td style={{ width: '58%', verticalAlign: 'top', fontSize: '9px', fontWeight: '700' }}>
-                                    {order.payments.map((payment) => (
-                                        <div key={payment.id} style={row}>
-                                            <span style={{ textTransform: 'capitalize' }}>{payment.method}</span>
-                                            <span>{Number(payment.amount).toFixed(2)}</span>
+                                <td style={{ width: '58%', verticalAlign: 'top', fontSize: '9px', fontWeight: 700 }}>
+                                    {order.payments.map(p => (
+                                        <div key={p.id} style={S.row}>
+                                            <span style={{ textTransform: 'capitalize' }}>{p.method}</span>
+                                            <span>{Number(p.amount).toFixed(2)}</span>
                                         </div>
                                     ))}
                                     <div style={{ borderTop: '1px solid #000', marginTop: '2px', paddingTop: '2px' }}>
-                                        <div style={row}>
-                                            <span>Paid Amount</span>
-                                            <span>{totalPaid.toFixed(2)}</span>
-                                        </div>
-                                        <div style={row}>
-                                            <span>Pending Amt</span>
-                                            <span>{pendingAmount.toFixed(2)}</span>
-                                        </div>
-                                        <div style={row}>
-                                            <span>Refund Amt</span>
-                                            <span>0.00</span>
-                                        </div>
-                                        <div style={{ ...row, fontWeight: '900', borderTop: '1px solid #000', marginTop: '2px', paddingTop: '2px' }}>
+                                        <div style={S.row}><span>Paid Amount</span><span>{totalPaid.toFixed(2)}</span></div>
+                                        <div style={S.row}><span>Pending Amt</span><span>{pendingAmount.toFixed(2)}</span></div>
+                                        <div style={S.row}><span>Refund Amt</span><span>0.00</span></div>
+                                        <div style={{ ...S.row, fontWeight: 900, borderTop: '1px solid #000', marginTop: '2px', paddingTop: '2px' }}>
                                             <span>Balance Amt</span>
-                                            <span>{balanceAmount.toFixed(2)}</span>
+                                            <span>0.00</span>
                                         </div>
                                     </div>
                                 </td>
@@ -362,13 +295,13 @@ export default function Invoice({ order }: Props) {
                     </table>
                 </div>
 
-                {/* ── Footer ───────────────────────────────────────────── */}
-                <div style={{ textAlign: 'center', paddingTop: '4px', paddingBottom: '4px', fontSize: '10px', fontWeight: '900', letterSpacing: '0.5px' }}>
+                {/* ── Footer ──────────────────────────────────── */}
+                <div style={{ textAlign: 'center', padding: '4px 0', fontSize: '10px', fontWeight: 900, letterSpacing: '0.5px' }}>
                     ** THANK YOU... VISIT AGAIN! **
                 </div>
             </div>
 
-            {/* ── Print Styles ─────────────────────────────────────────── */}
+            {/* ── Print styles ─────────────────────────────────── */}
             <style>{`
                 @media print {
                     html, body {
@@ -385,9 +318,6 @@ export default function Invoice({ order }: Props) {
                         -webkit-print-color-adjust: exact !important;
                         color: #000 !important;
                         background: transparent !important;
-                        -webkit-font-smoothing: none !important;
-                        font-smoothing: none !important;
-                        text-rendering: optimizeSpeed !important;
                     }
                     #invoice-root {
                         width: 80mm !important;

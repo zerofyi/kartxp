@@ -26,7 +26,16 @@ Route::get('soon', function () {
 
 Route::middleware(['auth', 'verified', 'check'])->prefix('')->group(function () {
     Route::get('dashboard', function () {
-        return Inertia::render('dashboard');
+        $role = \Illuminate\Support\Facades\Auth::user()->role;
+        return match ($role) {
+            'admin'          => redirect()->route('admin.dashboard'),
+            'warehouse'      => redirect()->route('warehouse.dashboard'),
+            'manager'        => redirect()->route('manager.dashboard'),
+            'staff'          => redirect()->route('staff.dashboard'),
+            'delivery_agent' => redirect()->route('agent.dashboard'),
+            'customer'       => redirect()->route('customer.dashboard'),
+            default          => redirect('/'),
+        };
     })->name('dashboard');
 
 
@@ -39,3 +48,9 @@ require __DIR__.'/auth.php';
 require __DIR__.'/admin.php';
 require __DIR__.'/warehouse.php';
 require __DIR__.'/settings.php';
+require __DIR__.'/manager.php';
+require __DIR__.'/staff.php';
+require __DIR__.'/agent.php';
+require __DIR__.'/customer.php';
+
+

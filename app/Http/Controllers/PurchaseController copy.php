@@ -35,7 +35,7 @@ class PurchaseController extends Controller
 
         $warehouses = Warehouse::where('user_id', Auth::id())->orderBy('name')->get(['id', 'name', 'location']);
 
-        return Inertia::render('warehouse/PurchaseList', [
+        return Inertia::render('Warehouse/PurchaseList', [
             'purchases' => $purchases,
             'warehouses' => $warehouses,
         ]);
@@ -73,7 +73,7 @@ class PurchaseController extends Controller
                 ];
             });
 
-        return Inertia::render('warehouse/AddPurchase', [
+        return Inertia::render('Warehouse/AddPurchase', [
             'vendors' => $vendors,
             'warehouses' => $warehouses,
             'products' => $products,

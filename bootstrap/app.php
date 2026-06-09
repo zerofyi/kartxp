@@ -3,8 +3,12 @@
 use App\Http\Middleware\AdminMiddleware;
 use App\Http\Middleware\AuthCheckMiddleware;
 use App\Http\Middleware\CustomerMiddleware;
+use App\Http\Middleware\EnsureWarehouseAccess;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RoleRedirect;
+use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\VerifyPhonePeWebhook;
 use App\Http\Middleware\WarehouseMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -25,13 +29,17 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
+            SecurityHeaders::class,
         ]);
 
         $middleware->alias([
-            'admin' => AdminMiddleware::class,
-            'warehouse' => WarehouseMiddleware::class,
-            'customer' => CustomerMiddleware::class,
-            'check' => AuthCheckMiddleware::class,
+            'admin'            => AdminMiddleware::class,
+            'warehouse'        => WarehouseMiddleware::class,
+            'customer'         => CustomerMiddleware::class,
+            'check'            => AuthCheckMiddleware::class,
+            'role.redirect'    => RoleRedirect::class,
+            'warehouse.access' => EnsureWarehouseAccess::class,
+            'phonepe.webhook'  => VerifyPhonePeWebhook::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

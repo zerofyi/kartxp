@@ -13,10 +13,9 @@ return new class extends Migration
     {
         Schema::create('accounts', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained('users');
             $table->string('name');
-            $table->enum('type', ['asset','liability','income','expense']);
-            $table->foreignId('parent_id')->nullable()->constrained('accounts');
+            $table->enum('type', ['asset','liability','income','expense','equity']);
+            $table->boolean('is_active')->default(true);
         });
 
     }

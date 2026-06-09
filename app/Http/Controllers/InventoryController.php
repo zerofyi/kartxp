@@ -9,494 +9,327 @@ use App\Models\StockLedger;
 use App\Models\StockSnapshot;
 use App\Models\Warehouse;
 use Illuminate\Http\Request;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
+use Inertia\Response;
 
 class InventoryController extends Controller
 {
     /**
-     * Display inventory overview - all products with stock levels
+     * Resolve the active warehouse ID context for the authenticated user session.
      */
-    public function index()
+    private function currentWarehouseId(): int
     {
-        // Get all product variants with stock information
-        $inventory = ProductVariant::with([
-            'product:id,name,category_id',
-            'product.category:id,name',
-            'unit:id,symbol',
-            'stockSnapshots.warehouse:id,name,location',
-        ])
-            ->where('status', true)
-            ->get()
-            ->map(function ($variant) {
-                // Calculate total available and reserved across all warehouses
-                $totalAvailable = $variant->stockSnapshots->sum('available_quantity');
-                $totalReserved = $variant->stockSnapshots->sum('reserved_quantity');
+        return Auth::user()->currentWarehouse()->value('warehouses.id')
+            ?? abort(403, 'Warehouse session context missing or invalid.');
+    }
 
-                // Get warehouse-wise stock
-                $warehouseStocks = $variant->stockSnapshots->map(function ($snapshot) {
-                    return [
-                        'warehouse_id' => $snapshot->warehouse_id,
-                        'warehouse_name' => $snapshot->warehouse->name,
-                        'available_quantity' => $snapshot->available_quantity,
-                        'reserved_quantity' => $snapshot->reserved_quantity,
-                    ];
-                });
+    /**
+     * Display a clean listing of inventory for the single active warehouse node context.
+     */
+    public function index(Request $request): Response
+    {
+        $warehouseId = $this->currentWarehouseId();
 
-                // Get batches for this variant
-                $batches = StockBatch::with('warehouse:id,name')
-                    ->where('product_variant_id', $variant->id)
-                    ->where('received_quantity', '>', 0)
-                    ->get()
-                    ->map(function ($batch) {
-                        return [
-                            'batch_no' => $batch->batch_no,
-                            'expiry_date' => $batch->expiry_date,
-                            'quantity' => $batch->available_quantity,
-                            'warehouse_name' => $batch->warehouse->name,
-                        ];
-                    });
+        $query = ProductVariant::query()
+            ->with([
+                'product:id,name,category_id',
+                'product.category:id,name',
+                'barcodes:id,product_variant_id,barcode,is_primary',
+                'stockSnapshots' => fn($q) => $q->where('warehouse_id', $warehouseId)
+            ])
+            ->where('status', true);
 
-                return [
-                    'product_variant_id' => $variant->id,
-                    'product_barcodes' => $variant->barcodes,
-                    'product_name' => $variant->product->name,
-                    'variant_name' => $variant->variant_name,
-                    'sku' => $variant->sku,
-                    'category_name' => $variant->product->category->name,
-                    'unit_symbol' => $variant->unit->symbol,
-                    'total_available' => $totalAvailable,
-                    'total_reserved' => $totalReserved,
-                    'reorder_level' => $variant->reorder_level ?? 0,
-                    'cost_price' => $variant->cost_price,
-                    'selling_price' => $variant->selling_price,
-                    'mrp' => $variant->mrp,
-                    'warehouse_stocks' => $warehouseStocks,
-                    'batches' => $batches,
-                ];
+        // Scan/Enter Search Query Processing
+        if ($request->filled('search')) {
+            $search = $request->input('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('sku', 'like', "%{$search}%")
+                ->orWhere('variant_name', 'like', "%{$search}%")
+                ->orWhereHas('product', fn($inner) => $inner->where('name', 'like', "%{$search}%"))
+                ->orWhereHas('barcodes', fn($inner) => $inner->where('barcode', 'like', "%{$search}%"));
             });
+        }
 
-        $variantsWithoutBarcode = ProductVariant::doesntHave('barcodes')->count();
+        if ($request->filled('category_id') && $request->input('category_id') !== 'all') {
+            $query->whereHas('product', fn($q) => $q->where('category_id', $request->input('category_id')));
+        }
 
-        // Get all categories and warehouses for filters
-        $categories = Category::orderBy('name')->get(['id', 'name']);
-        $warehouses = Warehouse::orderBy('name')->get(['id', 'name', 'location']);
+        if ($request->filled('stock_status')) {
+            $status = $request->input('stock_status');
+            if ($status === 'out_of_stock') {
+                $query->whereDoesntHave('stockSnapshots', fn($q) => $q->where('warehouse_id', $warehouseId)->where('available_quantity', '>', 0));
+            } elseif ($status === 'low_stock') {
+                $query->whereHas('stockSnapshots', function ($q) use ($warehouseId) {
+                    $q->where('warehouse_id', $warehouseId)
+                    ->whereRaw('available_quantity <= product_variants.stock_alert_qty');
+                });
+            } elseif ($status === 'no_barcode') {
+                $query->doesntHave('barcodes');
+            }
+        }
 
-        // Calculate summary statistics
-        $lowStockCount = $inventory->filter(function ($item) {
-            return $item['total_available'] > 0 && $item['total_available'] <= $item['reorder_level'];
-        })->count();
+        $sortBy    = $request->input('sort_by', 'name');
+        $sortOrder = $request->input('sort_order', 'asc');
 
-        $outOfStockCount = $inventory->filter(function ($item) {
-            return $item['total_available'] === 0;
-        })->count();
+        if ($sortBy === 'name') {
+            $query->join('products', 'product_variants.product_id', '=', 'products.id')
+                ->orderBy('products.name', $sortOrder)
+                ->select('product_variants.*');
+        } else {
+            $query->orderBy($sortBy === 'value' ? 'cost_price' : 'id', $sortOrder);
+        }
 
-        $totalProducts = $inventory->count();
+        $inventoryPaginated = $query->paginate(25)->withQueryString();
 
-        $totalStockValue = $inventory->sum(function ($item) {
-            return $item['total_available'] * $item['cost_price'];
+        $inventoryPaginated->getCollection()->transform(function ($variant) {
+            $snapshot  = $variant->stockSnapshots->first();
+            $available = $snapshot ? $snapshot->available_quantity : 0;
+            $reserved  = $snapshot ? $snapshot->reserved_quantity : 0;
+
+            return [
+                'product_variant_id' => $variant->id,
+                'product_name'       => $variant->product->name ?? 'Deleted Product',
+                'variant_name'       => $variant->variant_name,
+                'sku'                => $variant->sku,
+                'category_name'      => $variant->product->category->name ?? 'Unassigned',
+                'total_available'    => (int) $available,
+                'total_reserved'     => (int) $reserved,
+                'reorder_level'      => (int) ($variant->stock_alert_qty ?? 0),
+                'cost_price'         => (float) $variant->cost_price,
+                'selling_price'      => (float) $variant->selling_price,
+                'mrp'                => (float) $variant->mrp,
+                'product_barcodes'   => $variant->barcodes->map(fn($b) => [
+                    'barcode'    => $b->barcode,
+                    'is_primary' => (bool) $b->is_primary,
+                ]),
+            ];
         });
 
-        return Inertia::render('warehouse/Inventory', [
-            'inventory' => $inventory,
-            'categories' => $categories,
-            'warehouses' => $warehouses,
-            'lowStockCount' => $lowStockCount,
-            'outOfStockCount' => $outOfStockCount,
-            'totalProducts' => $totalProducts,
-            'totalStockValue' => $totalStockValue,
-            'variantsWithoutBarcode' => $variantsWithoutBarcode,
+        // ── Global metrics — always computed across ALL active variants, never from the filtered/paginated query ──
+
+        $activeVariantIds = ProductVariant::where('status', true)->pluck('id');
+
+        $totalProducts = $activeVariantIds->count();
+
+        $variantsWithoutBarcode = ProductVariant::where('status', true)
+            ->doesntHave('barcodes')
+            ->count();
+
+        // Variants that either have no snapshot in this warehouse, or their snapshot shows 0 available
+        $variantsWithStock = StockSnapshot::where('warehouse_id', $warehouseId)
+            ->whereIn('product_variant_id', $activeVariantIds)
+            ->where('available_quantity', '>', 0)
+            ->pluck('product_variant_id');
+
+        $outOfStockCount = $activeVariantIds->diff($variantsWithStock)->count();
+
+        $totalStockValue = StockSnapshot::where('warehouse_id', $warehouseId)
+            ->whereIn('product_variant_id', $activeVariantIds)
+            ->join('product_variants', 'stock_snapshots.product_variant_id', '=', 'product_variants.id')
+            ->selectRaw('SUM(stock_snapshots.available_quantity * product_variants.cost_price) as val')
+            ->value('val') ?? 0;
+
+        return Inertia::render('Warehouse/Inventory', [
+            'inventory'              => $inventoryPaginated,
+            'categories'             => Category::orderBy('name')->get(['id', 'name']),
+            'totalProducts'          => (int) $totalProducts,
+            'outOfStockCount'        => (int) $outOfStockCount,
+            'variantsWithoutBarcode' => (int) $variantsWithoutBarcode,
+            'totalStockValue'        => (float) $totalStockValue,
+            'filters'                => $request->only(['search', 'category_id', 'stock_status', 'sort_by', 'sort_order']),
         ]);
     }
 
     /**
-     * Display detailed inventory for a specific product variant
+     * Display inventory details for a specific product variant within the current active warehouse.
      */
-    public function show(ProductVariant $productVariant)
+    public function show(ProductVariant $productVariant): Response
     {
-        // Load product details
+        $warehouseId = $this->currentWarehouseId();
+
         $productVariant->load([
-            'product:id,name,category_id',
-            'product.category:id,name',
-            'unit:id,symbol',
+            'product.category',
+            'unit',
         ]);
 
-        $product = [
-            'id' => $productVariant->id,
-            'product_name' => $productVariant->product->name,
-            'variant_name' => $productVariant->variant_name,
-            'sku' => $productVariant->sku,
-            'category_name' => $productVariant->product->category->name,
-            'unit_symbol' => $productVariant->unit->symbol,
-            'reorder_level' => $productVariant->reorder_level ?? 0,
-            'cost_price' => $productVariant->cost_price,
-            'selling_price' => $productVariant->selling_price,
-            'mrp' => $productVariant->mrp,
+        $productData = [
+            'id'            => $productVariant->id,
+            'product_name'  => $productVariant->product->name ?? 'Deleted Asset',
+            'variant_name'  => $productVariant->variant_name,
+            'sku'           => $productVariant->sku,
+            'category_name' => $productVariant->product->category->name ?? 'Unassigned',
+            'reorder_level' => (int) ($productVariant->stock_alert_qty ?? 0),
+            'cost_price'    => (float) $productVariant->cost_price,
+            'selling_price' => (float) $productVariant->selling_price,
+            'mrp'           => (float) $productVariant->mrp,
         ];
 
-        // Get warehouse-wise stock
-        $warehouseStocks = StockSnapshot::with('warehouse:id,name,location')
-            ->where('product_variant_id', $productVariant->id)
-            ->get()
-            ->map(function ($snapshot) {
-                return [
-                    'warehouse_id' => $snapshot->warehouse_id,
-                    'warehouse_name' => $snapshot->warehouse->name,
-                    'warehouse_location' => $snapshot->warehouse->location,
-                    'available_quantity' => $snapshot->available_quantity,
-                    'reserved_quantity' => $snapshot->reserved_quantity,
-                ];
-            });
+        $snapshot = StockSnapshot::where('product_variant_id', $productVariant->id)
+            ->where('warehouse_id', $warehouseId)
+            ->first();
 
-        // Calculate totals
-        $totalAvailable = $warehouseStocks->sum('available_quantity');
-        $totalReserved = $warehouseStocks->sum('reserved_quantity');
+        $totalAvailable = $snapshot ? $snapshot->available_quantity : 0;
+        $totalReserved = $snapshot ? $snapshot->reserved_quantity : 0;
 
-        // Get batch details
-        $batches = StockBatch::with([
-            'warehouse:id,name',
-            'purchaseItem.purchase:id,invoice_no,purchase_date'
-        ])
-            ->where('product_variant_id', $productVariant->id)
+        $batches = StockBatch::where('product_variant_id', $productVariant->id)
+            ->where('warehouse_id', $warehouseId)
+            ->with(['purchaseItem.purchase:id,invoice_no,purchase_date'])
             ->orderBy('expiry_date', 'asc')
             ->get()
-            ->map(function ($batch) {
-                return [
-                    'id' => $batch->id,
-                    'batch_no' => $batch->batch_no,
-                    'expiry_date' => $batch->expiry_date,
-                    'received_quantity' => $batch->received_quantity,
-                    'available_quantity' => $batch->available_quantity,
-                    'warehouse_name' => $batch->warehouse->name,
-                    'purchase_invoice_no' => $batch->purchaseItem?->purchase->invoice_no ?? 'N/A',
-                    'purchase_date' => $batch->purchaseItem?->purchase->purchase_date ?? null,
-                ];
-            });
+            ->map(fn($b) => [
+                'id'                  => $b->id,
+                'batch_no'            => $b->batch_no,
+                'expiry_date'         => $b->expiry_date,
+                'received_quantity'   => (int) $b->received_quantity,
+                'available_quantity'  => (int) $b->available_quantity,
+                'purchase_invoice_no' => $b->purchaseItem->purchase->invoice_no ?? 'N/A',
+                'purchase_date'       => $b->purchaseItem->purchase->purchase_date ?? null,
+            ]);
 
-        // Get stock movement history (last 50 movements)
-        $stockMovements = StockLedger::with([
-            'warehouse:id,name',
-            'batch:id,batch_no'
-        ])
-            ->where('product_variant_id', $productVariant->id)
-            ->orderBy('created_at', 'desc')
+        $stockMovements = StockLedger::where('product_variant_id', $productVariant->id)
+            ->where('warehouse_id', $warehouseId)
+            ->with(['batch:id,batch_no'])
+            ->orderByDesc('created_at')
             ->limit(50)
             ->get()
-            ->map(function ($ledger) {
-                return [
-                    'id' => $ledger->id,
-                    'movement_type' => $ledger->movement_type,
-                    'quantity' => $ledger->quantity,
-                    'warehouse_name' => $ledger->warehouse->name,
-                    'batch_no' => $ledger->batch->batch_no ?? 'N/A',
-                    'source_type' => $ledger->source_type,
-                    'created_at' => $ledger->created_at,
-                    'remarks' => $ledger->remarks ?? '',
-                ];
-            });
+            ->map(fn($l) => [
+                'id'            => $l->id,
+                'movement_type' => $l->movement_type,
+                'quantity'      => (int) $l->quantity,
+                'batch_no'      => $l->batch->batch_no ?? 'N/A',
+                'source_type'   => class_basename($l->source_type),
+                'created_at'    => $l->created_at->toIso8601String(),
+                'remarks'       => $l->remarks ?? '',
+            ]);
 
-        return Inertia::render('warehouse/InventoryDetails', [
-            'product' => $product,
-            'warehouseStocks' => $warehouseStocks,
-            'batches' => $batches,
+        return Inertia::render('Warehouse/InventoryDetails', [
+            'product'        => $productData,
+            'batches'        => $batches,
             'stockMovements' => $stockMovements,
-            'totalAvailable' => $totalAvailable,
-            'totalReserved' => $totalReserved,
+            'totalAvailable' => (int) $totalAvailable,
+            'totalReserved'  => (int) $totalReserved,
         ]);
     }
 
     /**
-     * Show barcode printing page
+     * Display barcode management parameters console console.
      */
-    public function barcode(ProductVariant $productVariant)
+    public function barcode(ProductVariant $productVariant): Response
     {
-        $productVariant->load([
-            'product:id,name',
-            'barcodes:id,product_variant_id,barcode,is_primary',
-            'stockSnapshots:id,product_variant_id,available_quantity'
-        ]);
+        $productVariant->load(['product', 'barcodes', 'stockSnapshots']);
 
-        return Inertia::render('warehouse/Barcode', [
+        return Inertia::render('Warehouse/Barcode', [
             'variant' => [
-                'id' => $productVariant->id,
-                'variant_name' => $productVariant->variant_name,
-                'sku' => $productVariant->sku,
+                'id'            => $productVariant->id,
+                'variant_name'  => $productVariant->variant_name,
+                'sku'           => $productVariant->sku,
                 'selling_price' => (float) $productVariant->selling_price,
-                'mrp' => (float) $productVariant->mrp,
-                'product' => [
-                    'name' => $productVariant->product->name,
-                ],
-                'barcodes' => $productVariant->barcodes->map(function ($barcode) {
-                    return [
-                        'id' => $barcode->id,
-                        'barcode' => $barcode->barcode,
-                        'is_primary' => (bool) $barcode->is_primary,
-                    ];
-                }),
+                'mrp'           => (float) $productVariant->mrp,
+                'product'       => ['name' => $productVariant->product->name ?? 'Deleted Asset'],
+                'barcodes'      => $productVariant->barcodes->map(fn($b) => [
+                    'id'         => $b->id,
+                    'barcode'    => $b->barcode,
+                    'is_primary' => (bool) $b->is_primary,
+                ]),
             ],
-            'stock' => $productVariant->stockSnapshots->sum('available_quantity'),
+            'stock'   => (int) $productVariant->stockSnapshots->sum('available_quantity'),
         ]);
     }
 
-    public function barcode2(ProductVariant $productVariant)
-    {
-        $barcodes = $productVariant->barcodes()->get(['id', 'barcode']);
-        return response()->json($barcodes);
-    }
-
     /**
-     * Show barcode labels for printing
+     * Print standard thermal barcode sticker configurations.
      */
-    public function printBarcode(ProductVariant $productVariant, Request $request)
+    public function printBarcode(ProductVariant $productVariant, Request $request): Response
     {
         $validated = $request->validate([
-            'barcode' => 'required|string',
-            'qty' => 'required|integer|min:1',
-            'copies' => 'required|integer|min:1|max:100',
-            'size' => 'required|string|in:40x30,50x30,60x40,30x20',
-            'showName' => 'required|boolean',
+            'barcode'   => 'required|string',
+            'qty'       => 'required|integer|min:1',
+            'copies'    => 'required|integer|min:1|max:100',
+            'size'      => 'required|string|in:40x30,50x30,60x40,30x20',
+            'showName'  => 'required|boolean',
             'showPrice' => 'required|boolean',
-            'showSku' => 'required|boolean',
-            'showMRP' => 'required|boolean',
+            'showSku'   => 'required|boolean',
+            'showMRP'   => 'required|boolean',
         ]);
 
-        $productVariant->load([
-            'product:id,name',
-        ]);
+        $productVariant->load('product');
 
-        // return Inertia::render('warehouse/BarcodeLabelPrint', [
-        //     'variant' => [
-        //         'id' => $productVariant->id,
-        //         'variant_name' => $productVariant->variant_name,
-        //         'sku' => $productVariant->sku,
-        //         'selling_price' => (float) $productVariant->selling_price,
-        //         'mrp' => (float) $productVariant->mrp,
-        //         'product' => [
-        //             'name' => $productVariant->product->name,
-        //         ],
-        //     ],
-        //     'barcode' => $validated['barcode'],
-        //     'qty' => $validated['qty'],
-        //     'copies' => $validated['copies'],
-        //     'size' => $validated['size'],
-        //     'showName' => $validated['showName'],
-        //     'showPrice' => $validated['showPrice'],
-        //     'showSku' => $validated['showSku'],
-        //     'showMRP' => $validated['showMRP'],
-        // ]);
-        
-        return Inertia::render('warehouse/BarcodeLabelPrint', [
-            'variant' => [
-                'id' => $productVariant->id,
-                'variant_name' => $productVariant->variant_name,
-                'sku' => $productVariant->sku,
+        return Inertia::render('Warehouse/BarcodeLabelPrint', [
+            'variant'   => [
+                'id'            => $productVariant->id,
+                'variant_name'  => $productVariant->variant_name,
+                'sku'           => $productVariant->sku,
                 'selling_price' => (float) $productVariant->selling_price,
-                'mrp' => (float) $productVariant->mrp,
-                'product' => [
-                    'name' => $productVariant->product->name,
-                ],
+                'mrp'           => (float) $productVariant->mrp,
+                'product'       => ['name' => $productVariant->product->name ?? '—'],
             ],
-            'barcode' => $validated['barcode'],
-            'qty' => (int) $validated['qty'],
-            'copies' => (int) $validated['copies'],
-            'size' => $validated['size'],
-            'showName' => $request->boolean('showName'),
-            'showPrice' => $request->boolean('showPrice'),
-            'showSku' => $request->boolean('showSku'),
-            'showMRP' => $request->boolean('showMRP'),
+            'barcode'   => $validated['barcode'],
+            'qty'       => (int) $validated['qty'],
+            'copies'    => (int) $validated['copies'],
+            'size'      => $validated['size'],
+            'showName'  => (bool) $validated['showName'],
+            'showPrice' => (bool) $validated['showPrice'],
+            'showSku'   => (bool) $validated['showSku'],
+            'showMRP'   => (bool) $validated['showMRP'],
         ]);
     }
 
     /**
-     * Get low stock items report
+     * Adjust stock quantities under an isolation transaction lock manually.
      */
-    public function lowStock()
-    {
-        $lowStockItems = ProductVariant::with([
-            'product:id,name,category_id',
-            'product.category:id,name',
-            'unit:id,symbol',
-            'stockSnapshots',
-        ])
-            ->where('status', true)
-            ->get()
-            ->map(function ($variant) {
-                $totalAvailable = $variant->stockSnapshots->sum('available_quantity');
-                $reorderLevel = $variant->reorder_level ?? 0;
-
-                return [
-                    'product_variant_id' => $variant->id,
-                    'product_name' => $variant->product->name,
-                    'variant_name' => $variant->variant_name,
-                    'sku' => $variant->sku,
-                    'category_name' => $variant->product->category->name,
-                    'unit_symbol' => $variant->unit->symbol,
-                    'total_available' => $totalAvailable,
-                    'reorder_level' => $reorderLevel,
-                    'shortage' => $reorderLevel - $totalAvailable,
-                ];
-            })
-            ->filter(function ($item) {
-                return $item['total_available'] <= $item['reorder_level'];
-            })
-            ->values();
-
-        return response()->json($lowStockItems);
-    }
-
-    /**
-     * Get expiring batches report
-     */
-    public function expiringBatches(Request $request)
-    {
-        $days = $request->input('days', 30); // Default to 30 days
-
-        $expiryDate = now()->addDays($days);
-
-        $expiringBatches = StockBatch::with([
-            'productVariant.product:id,name',
-            'productVariant.unit:id,symbol',
-            'warehouse:id,name',
-        ])
-            ->whereNotNull('expiry_date')
-            ->where('expiry_date', '<=', $expiryDate)
-            ->where('expiry_date', '>=', now())
-            ->where('available_quantity', '>', 0)
-            ->orderBy('expiry_date', 'asc')
-            ->get()
-            ->map(function ($batch) {
-                return [
-                    'batch_id' => $batch->id,
-                    'batch_no' => $batch->batch_no,
-                    'product_name' => $batch->productVariant->product->name,
-                    'variant_name' => $batch->productVariant->variant_name,
-                    'sku' => $batch->productVariant->sku,
-                    'warehouse_name' => $batch->warehouse->name,
-                    'available_quantity' => $batch->available_quantity,
-                    'unit_symbol' => $batch->productVariant->unit->symbol,
-                    'expiry_date' => $batch->expiry_date,
-                    'days_to_expiry' => now()->diffInDays($batch->expiry_date),
-                ];
-            });
-
-        return response()->json($expiringBatches);
-    }
-
-    /**
-     * Get stock valuation report
-     */
-    public function stockValuation()
-    {
-        $valuation = ProductVariant::with([
-            'product:id,name,category_id',
-            'product.category:id,name',
-            'unit:id,symbol',
-            'stockSnapshots',
-        ])
-            ->where('status', true)
-            ->get()
-            ->map(function ($variant) {
-                $totalAvailable = $variant->stockSnapshots->sum('available_quantity');
-                $stockValue = $totalAvailable * $variant->cost_price;
-                $potentialRevenue = $totalAvailable * $variant->selling_price;
-                $potentialProfit = $potentialRevenue - $stockValue;
-
-                return [
-                    'product_variant_id' => $variant->id,
-                    'product_name' => $variant->product->name,
-                    'variant_name' => $variant->variant_name,
-                    'sku' => $variant->sku,
-                    'category_name' => $variant->product->category->name,
-                    'unit_symbol' => $variant->unit->symbol,
-                    'total_available' => $totalAvailable,
-                    'cost_price' => $variant->cost_price,
-                    'selling_price' => $variant->selling_price,
-                    'stock_value' => $stockValue,
-                    'potential_revenue' => $potentialRevenue,
-                    'potential_profit' => $potentialProfit,
-                    'profit_margin' => $stockValue > 0 ? ($potentialProfit / $stockValue) * 100 : 0,
-                ];
-            })
-            ->sortByDesc('stock_value')
-            ->values();
-
-        $summary = [
-            'total_stock_value' => $valuation->sum('stock_value'),
-            'total_potential_revenue' => $valuation->sum('potential_revenue'),
-            'total_potential_profit' => $valuation->sum('potential_profit'),
-            'total_products' => $valuation->count(),
-        ];
-
-        return response()->json([
-            'items' => $valuation,
-            'summary' => $summary,
-        ]);
-    }
-
-    /**
-     * Adjust stock manually (for corrections, damages, etc.)
-     */
-    public function adjustStock(Request $request)
+    public function adjustStock(Request $request): RedirectResponse
     {
         $validated = $request->validate([
             'product_variant_id' => 'required|exists:product_variants,id',
-            'warehouse_id' => 'required|exists:warehouses,id',
-            'adjustment_type' => 'required|in:increase,decrease',
-            'quantity' => 'required|integer|min:1',
-            'reason' => 'required|string',
-            'batch_id' => 'nullable|exists:stock_batches,id',
+            'warehouse_id'       => 'required|exists:warehouses,id',
+            'adjustment_type'    => 'required|in:increase,decrease',
+            'quantity'           => 'required|integer|min:1',
+            'reason'             => 'required|string|max:255',
+            'batch_id'           => 'nullable|exists:stock_batches,id',
         ]);
 
-        DB::beginTransaction();
-        try {
+        DB::transaction(function () use ($validated) {
             $movementType = $validated['adjustment_type'] === 'increase' ? 'IN' : 'OUT';
-            $quantity = $validated['quantity'];
+            $qty = $validated['quantity'];
 
-            // Create stock ledger entry
             StockLedger::create([
                 'product_variant_id' => $validated['product_variant_id'],
-                'warehouse_id' => $validated['warehouse_id'],
-                'batch_id' => $validated['batch_id'],
-                'movement_type' => $movementType,
-                'quantity' => $quantity,
-                'source_type' => 'Manual Adjustment',
-                'source_id' => null,
-                'remarks' => $validated['reason'],
+                'warehouse_id'       => $validated['warehouse_id'],
+                'batch_id'           => $validated['batch_id'] ?? null,
+                'movement_type'      => $movementType,
+                'quantity'           => $qty,
+                'source_type'        => self::class,
+                'source_id'          => Auth::id(),
+                'remarks'            => $validated['reason'],
             ]);
 
-            // Update stock snapshot
             $snapshot = StockSnapshot::firstOrCreate(
                 [
                     'product_variant_id' => $validated['product_variant_id'],
-                    'warehouse_id' => $validated['warehouse_id'],
+                    'warehouse_id'       => $validated['warehouse_id'],
                 ],
-                [
-                    'available_quantity' => 0,
-                    'reserved_quantity' => 0,
-                ]
+                ['available_quantity' => 0, 'reserved_quantity' => 0]
             );
 
             if ($movementType === 'IN') {
-                $snapshot->increment('available_quantity', $quantity);
+                $snapshot->increment('available_quantity', $qty);
             } else {
-                $snapshot->decrement('available_quantity', $quantity);
+                $snapshot->decrement('available_quantity', $qty);
             }
 
-            // Update batch if specified
-            if ($validated['batch_id']) {
-                $batch = StockBatch::find($validated['batch_id']);
+            if (!empty($validated['batch_id'])) {
+                $batch = StockBatch::findOrFail($validated['batch_id']);
                 if ($movementType === 'IN') {
-                    $batch->increment('available_quantity', $quantity);
+                    $batch->increment('available_quantity', $qty);
                 } else {
-                    $batch->decrement('available_quantity', $quantity);
+                    $batch->decrement('available_quantity', $qty);
                 }
             }
+        });
 
-            DB::commit();
-            return redirect()->back()->with('success', 'Stock adjusted successfully.');
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return redirect()->back()->withErrors(['error' => 'Failed to adjust stock: ' . $e->getMessage()]);
-        }
+        return back()->with('success', 'Physical stock metrics adjusted and committed cleanly.');
     }
 }

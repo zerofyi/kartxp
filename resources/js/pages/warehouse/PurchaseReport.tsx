@@ -1,11 +1,20 @@
 import { Head, router } from '@inertiajs/react';
-import React, { useState, useEffect, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowLeft, Download, FileText, Filter } from 'lucide-react';
 
 import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
 import type { BreadcrumbItem } from '@/types';
+
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -15,8 +24,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
     Table,
     TableBody,
@@ -26,11 +33,17 @@ import {
     TableRow,
 } from '@/components/ui/table';
 
+const ROUTES = {
+    purchases: '/warehouse/purchases',
+};
+
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: dashboard().url },
-    { title: 'Purchases', href: '/purchases' },
+    { title: 'Purchases', href: ROUTES.purchases },
     { title: 'Reports', href: '' },
 ];
+
+type PurchaseStatus = 'draft' | 'confirmed';
 
 type Vendor = {
     id: number;
@@ -47,84 +60,176 @@ type Purchase = {
     subtotal: number;
     tax_amount: number;
     total_amount: number;
-    status: 'draft' | 'confirmed';
+    status: PurchaseStatus;
     items_count?: number;
 };
 
-type Props = {
+type Props = Readonly<{
     purchases: Purchase[];
     vendors: Vendor[];
-};
+}>;
 
-export default function PurchaseReport({ purchases = [], vendors = [] }: Props) {
+export default function PurchaseReport({
+    purchases = [],
+    vendors = [],
+}: Props) {
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
-    const [vendorFilter, setVendorFilter] = useState<string>('all');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'confirmed'>('all');
+    const [vendorFilter, setVendorFilter] = useState('all');
+    const [statusFilter, setStatusFilter] = useState<
+        'all' | PurchaseStatus
+    >('all');
 
-    // Format numbers with proper rounding and commas
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-IN', {
-            maximumFractionDigits: 2,
-            minimumFractionDigits: 2,
-        }).format(amount);
-    };
+    const currencyFormatter = useMemo(
+        () =>
+            new Intl.NumberFormat('en-IN', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            }),
+        []
+    );
 
-    // Filter purchases with proper date comparison
+    const dateFormatter = useMemo(
+        () =>
+            new Intl.DateTimeFormat('en-IN', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+            }),
+        []
+    );
+
+    const formatCurrency = (amount: number) =>
+        currencyFormatter.format(amount);
+
+    const fromTimestamp = useMemo(() => {
+        if (!dateFrom) return null;
+
+        const date = new Date(dateFrom);
+        date.setHours(0, 0, 0, 0);
+
+        return date.getTime();
+    }, [dateFrom]);
+
+    const toTimestamp = useMemo(() => {
+        if (!dateTo) return null;
+
+        const date = new Date(dateTo);
+        date.setHours(23, 59, 59, 999);
+
+        return date.getTime();
+    }, [dateTo]);
+
     const filteredPurchases = useMemo(() => {
         return purchases.filter((purchase) => {
-            const purchaseDate = new Date(purchase.purchase_date);
-            purchaseDate.setHours(0, 0, 0, 0); // Normalize time for date comparison
+            const purchaseTimestamp = new Date(
+                purchase.purchase_date
+            ).getTime();
 
-            let matchesDateFrom = true;
-            let matchesDateTo = true;
+            const matchesDateFrom =
+                !fromTimestamp || purchaseTimestamp >= fromTimestamp;
 
-            if (dateFrom) {
-                const fromDate = new Date(dateFrom);
-                fromDate.setHours(0, 0, 0, 0);
-                matchesDateFrom = purchaseDate >= fromDate;
-            }
+            const matchesDateTo =
+                !toTimestamp || purchaseTimestamp <= toTimestamp;
 
-            if (dateTo) {
-                const toDate = new Date(dateTo);
-                toDate.setHours(23, 59, 59, 999); // Include entire end date
-                matchesDateTo = purchaseDate <= toDate;
-            }
+            const matchesVendor =
+                vendorFilter === 'all' ||
+                String(purchase.vendor_id) === vendorFilter;
 
-            const matchesVendor = vendorFilter === 'all' || purchase.vendor_id.toString() === vendorFilter;
-            const matchesStatus = statusFilter === 'all' || purchase.status === statusFilter;
+            const matchesStatus =
+                statusFilter === 'all' ||
+                purchase.status === statusFilter;
 
-            return matchesDateFrom && matchesDateTo && matchesVendor && matchesStatus;
+            return (
+                matchesDateFrom &&
+                matchesDateTo &&
+                matchesVendor &&
+                matchesStatus
+            );
         });
-    }, [purchases, dateFrom, dateTo, vendorFilter, statusFilter]);
+    }, [
+        purchases,
+        fromTimestamp,
+        toTimestamp,
+        vendorFilter,
+        statusFilter,
+    ]);
 
-    // Calculate summary statistics with proper rounding
     const summary = useMemo(() => {
-        const totalAmount = filteredPurchases.reduce((sum, p) => sum + p.total_amount, 0);
-        const totalTax = filteredPurchases.reduce((sum, p) => sum + p.tax_amount, 0);
-        const totalSubtotal = filteredPurchases.reduce((sum, p) => sum + p.subtotal, 0);
+        return filteredPurchases.reduce(
+            (acc, purchase) => {
+                acc.totalPurchases += 1;
 
-        return {
-            totalPurchases: filteredPurchases.length,
-            totalAmount: parseFloat(Number(totalAmount).toFixed(2)),
-            totalTax: parseFloat(Number(totalTax).toFixed(2)),
-            totalSubtotal: parseFloat(Number(totalSubtotal).toFixed(2)),
-            confirmedCount: filteredPurchases.filter((p) => p.status === 'confirmed').length,
-            draftCount: filteredPurchases.filter((p) => p.status === 'draft').length,
-        };
+                acc.totalAmount += purchase.total_amount;
+                acc.totalTax += purchase.tax_amount;
+                acc.totalSubtotal += purchase.subtotal;
+
+                if (purchase.status === 'confirmed') {
+                    acc.confirmedCount += 1;
+                } else {
+                    acc.draftCount += 1;
+                }
+
+                return acc;
+            },
+            {
+                totalPurchases: 0,
+                totalAmount: 0,
+                totalTax: 0,
+                totalSubtotal: 0,
+                confirmedCount: 0,
+                draftCount: 0,
+            }
+        );
     }, [filteredPurchases]);
 
+    const vendorSummary = useMemo(() => {
+        return Object.entries(
+            filteredPurchases.reduce((acc, purchase) => {
+                const vendorName = purchase.vendor?.name || 'Unknown';
+
+                if (!acc[vendorName]) {
+                    acc[vendorName] = {
+                        count: 0,
+                        total: 0,
+                        vendorId: purchase.vendor_id,
+                    };
+                }
+
+                acc[vendorName].count += 1;
+                acc[vendorName].total += purchase.total_amount;
+
+                return acc;
+            }, {} as Record<string, { count: number; total: number; vendorId: number }>)
+        ).sort(([nameA], [nameB]) => nameA.localeCompare(nameB));
+    }, [filteredPurchases]);
+
+    const escapeCsv = (value: unknown) =>
+        `"${String(value ?? '').replace(/"/g, '""')}"`;
+
     const handleExport = () => {
-        // Create CSV content with proper formatting
-        const headers = ['Invoice No', 'Date', 'Vendor', 'Status', 'Subtotal', 'Tax', 'Total'];
-        const rows = filteredPurchases.map((p) => [
-            `"${p.invoice_no}"`, // Wrap in quotes in case invoice numbers have special characters
-            new Date(p.purchase_date).toLocaleDateString('en-IN'),
-            `"${p.vendor?.name || ''}"`,
-            p.status,
-            formatCurrency(p.subtotal),
-            formatCurrency(p.tax_amount),
-            formatCurrency(p.total_amount),
+        const headers = [
+            'Invoice No',
+            'Date',
+            'Vendor',
+            'Status',
+            'Subtotal',
+            'Tax',
+            'Total',
+        ];
+
+        const rows = filteredPurchases.map((purchase) => [
+            escapeCsv(purchase.invoice_no),
+            escapeCsv(
+                dateFormatter.format(
+                    new Date(purchase.purchase_date)
+                )
+            ),
+            escapeCsv(purchase.vendor?.name),
+            escapeCsv(purchase.status),
+            escapeCsv(purchase.subtotal),
+            escapeCsv(purchase.tax_amount),
+            escapeCsv(purchase.total_amount),
         ]);
 
         const csvContent = [
@@ -132,13 +237,23 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
             ...rows.map((row) => row.join(',')),
         ].join('\n');
 
-        // Download CSV
-        const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8' }); // BOM for UTF-8
+        const blob = new Blob(['\ufeff' + csvContent], {
+            type: 'text/csv;charset=utf-8',
+        });
+
         const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `purchase-report-${new Date().toISOString().split('T')[0]}.csv`;
-        a.click();
+
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = `purchase-report-${
+            new Date().toISOString().split('T')[0]
+        }.csv`;
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
         window.URL.revokeObjectURL(url);
     };
 
@@ -146,24 +261,12 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
         window.print();
     };
 
-    // Calculate vendor-wise summary
-    const vendorSummary = useMemo(() => {
-        return Object.entries(
-            filteredPurchases.reduce((acc, purchase) => {
-                const vendorName = purchase.vendor?.name || 'Unknown';
-                if (!acc[vendorName]) {
-                    acc[vendorName] = {
-                        count: 0,
-                        total: 0,
-                        vendorId: purchase.vendor_id
-                    };
-                }
-                acc[vendorName].count += 1;
-                acc[vendorName].total += purchase.total_amount;
-                return acc;
-            }, {} as Record<string, { count: number; total: number; vendorId: number }>)
-        ).sort(([nameA], [nameB]) => nameA.localeCompare(nameB)); // Sort alphabetically
-    }, [filteredPurchases]);
+    const resetFilters = () => {
+        setDateFrom('');
+        setDateTo('');
+        setVendorFilter('all');
+        setStatusFilter('all');
+    };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -175,10 +278,21 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
                     <CardHeader>
                         <div className="flex items-center justify-between">
                             <div>
-                                <CardTitle className="text-2xl">Purchase Reports</CardTitle>
-                                <CardDescription>Analyze your purchase history and trends</CardDescription>
+                                <CardTitle className="text-2xl">
+                                    Purchase Reports
+                                </CardTitle>
+
+                                <CardDescription>
+                                    Analyze your purchase history and trends
+                                </CardDescription>
                             </div>
-                            <Button variant="outline" onClick={() => router.get('/purchases')}>
+
+                            <Button
+                                variant="outline"
+                                onClick={() =>
+                                    router.visit(ROUTES.purchases)
+                                }
+                            >
                                 <ArrowLeft className="mr-2 size-4" />
                                 Back to Purchases
                             </Button>
@@ -194,40 +308,64 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
                             Filter Options
                         </CardTitle>
                     </CardHeader>
+
                     <CardContent>
                         <div className="grid gap-4 md:grid-cols-4">
                             <div className="space-y-2">
-                                <Label htmlFor="date_from">Date From</Label>
+                                <Label htmlFor="date_from">
+                                    Date From
+                                </Label>
+
                                 <Input
                                     id="date_from"
                                     type="date"
                                     value={dateFrom}
-                                    onChange={(e) => setDateFrom(e.target.value)}
+                                    onChange={(e) =>
+                                        setDateFrom(e.target.value)
+                                    }
                                     max={dateTo || undefined}
                                 />
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="date_to">Date To</Label>
+                                <Label htmlFor="date_to">
+                                    Date To
+                                </Label>
+
                                 <Input
                                     id="date_to"
                                     type="date"
                                     value={dateTo}
-                                    onChange={(e) => setDateTo(e.target.value)}
+                                    onChange={(e) =>
+                                        setDateTo(e.target.value)
+                                    }
                                     min={dateFrom || undefined}
                                 />
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="vendor">Vendor</Label>
-                                <Select value={vendorFilter} onValueChange={setVendorFilter}>
+                                <Label htmlFor="vendor">
+                                    Vendor
+                                </Label>
+
+                                <Select
+                                    value={vendorFilter}
+                                    onValueChange={setVendorFilter}
+                                >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select vendor" />
                                     </SelectTrigger>
+
                                     <SelectContent>
-                                        <SelectItem value="all">All Vendors</SelectItem>
+                                        <SelectItem value="all">
+                                            All Vendors
+                                        </SelectItem>
+
                                         {vendors.map((vendor) => (
-                                            <SelectItem key={vendor.id} value={vendor.id.toString()}>
+                                            <SelectItem
+                                                key={vendor.id}
+                                                value={String(vendor.id)}
+                                            >
                                                 {vendor.name}
                                             </SelectItem>
                                         ))}
@@ -236,18 +374,36 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="status">Status</Label>
+                                <Label htmlFor="status">
+                                    Status
+                                </Label>
+
                                 <Select
                                     value={statusFilter}
-                                    onValueChange={(value: 'all' | 'draft' | 'confirmed') => setStatusFilter(value)}
+                                    onValueChange={(
+                                        value:
+                                            | 'all'
+                                            | PurchaseStatus
+                                    ) =>
+                                        setStatusFilter(value)
+                                    }
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select status" />
                                     </SelectTrigger>
+
                                     <SelectContent>
-                                        <SelectItem value="all">All Status</SelectItem>
-                                        <SelectItem value="draft">Draft</SelectItem>
-                                        <SelectItem value="confirmed">Confirmed</SelectItem>
+                                        <SelectItem value="all">
+                                            All Status
+                                        </SelectItem>
+
+                                        <SelectItem value="draft">
+                                            Draft
+                                        </SelectItem>
+
+                                        <SelectItem value="confirmed">
+                                            Confirmed
+                                        </SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -257,27 +413,28 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
                             <Button
                                 variant="outline"
                                 onClick={handleExport}
-                                disabled={filteredPurchases.length === 0}
+                                disabled={
+                                    filteredPurchases.length === 0
+                                }
                             >
                                 <Download className="mr-2 size-4" />
                                 Export CSV
                             </Button>
+
                             <Button
                                 variant="outline"
                                 onClick={handlePrint}
-                                disabled={filteredPurchases.length === 0}
+                                disabled={
+                                    filteredPurchases.length === 0
+                                }
                             >
                                 <FileText className="mr-2 size-4" />
                                 Print Report
                             </Button>
+
                             <Button
                                 variant="outline"
-                                onClick={() => {
-                                    setDateFrom('');
-                                    setDateTo('');
-                                    setVendorFilter('all');
-                                    setStatusFilter('all');
-                                }}
+                                onClick={resetFilters}
                                 className="ml-auto"
                             >
                                 Clear Filters
@@ -290,21 +447,38 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
                 <div className="grid gap-4 md:grid-cols-4">
                     <Card>
                         <CardHeader className="pb-3">
-                            <CardDescription>Total Purchases</CardDescription>
-                            <CardTitle className="text-3xl">{summary.totalPurchases}</CardTitle>
+                            <CardDescription>
+                                Total Purchases
+                            </CardDescription>
+
+                            <CardTitle className="text-3xl">
+                                {summary.totalPurchases}
+                            </CardTitle>
                         </CardHeader>
+
                         <CardContent>
                             <div className="text-xs text-muted-foreground">
-                                {summary.confirmedCount} confirmed, {summary.draftCount} draft
+                                {summary.confirmedCount} confirmed,
+                                {' '}
+                                {summary.draftCount} draft
                             </div>
                         </CardContent>
                     </Card>
 
                     <Card>
                         <CardHeader className="pb-3">
-                            <CardDescription>Total Amount</CardDescription>
-                            <CardTitle className="text-3xl">₹{formatCurrency(summary.totalAmount)}</CardTitle>
+                            <CardDescription>
+                                Total Amount
+                            </CardDescription>
+
+                            <CardTitle className="text-3xl">
+                                ₹
+                                {formatCurrency(
+                                    summary.totalAmount
+                                )}
+                            </CardTitle>
                         </CardHeader>
+
                         <CardContent>
                             <div className="text-xs text-muted-foreground">
                                 Across all filtered purchases
@@ -314,9 +488,18 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
 
                     <Card>
                         <CardHeader className="pb-3">
-                            <CardDescription>Subtotal</CardDescription>
-                            <CardTitle className="text-3xl">₹{formatCurrency(summary.totalSubtotal)}</CardTitle>
+                            <CardDescription>
+                                Subtotal
+                            </CardDescription>
+
+                            <CardTitle className="text-3xl">
+                                ₹
+                                {formatCurrency(
+                                    summary.totalSubtotal
+                                )}
+                            </CardTitle>
                         </CardHeader>
+
                         <CardContent>
                             <div className="text-xs text-muted-foreground">
                                 Before taxes
@@ -326,9 +509,16 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
 
                     <Card>
                         <CardHeader className="pb-3">
-                            <CardDescription>Total Tax</CardDescription>
-                            <CardTitle className="text-3xl">₹{formatCurrency(summary.totalTax)}</CardTitle>
+                            <CardDescription>
+                                Total Tax
+                            </CardDescription>
+
+                            <CardTitle className="text-3xl">
+                                ₹
+                                {formatCurrency(summary.totalTax)}
+                            </CardTitle>
                         </CardHeader>
+
                         <CardContent>
                             <div className="text-xs text-muted-foreground">
                                 Tax amount paid
@@ -337,59 +527,126 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
                     </Card>
                 </div>
 
-                {/* Purchase Details Table */}
+                {/* Purchase Details */}
                 <Card className="flex-1 overflow-hidden">
                     <CardHeader>
-                        <CardTitle>Purchase Details ({filteredPurchases.length})</CardTitle>
+                        <CardTitle>
+                            Purchase Details (
+                            {filteredPurchases.length})
+                        </CardTitle>
                     </CardHeader>
+
                     <CardContent className="p-0">
-                        <div className="overflow-auto max-h-150">
+                        <div className="max-h-[600px] overflow-auto">
                             <Table>
-                                <TableHeader className="sticky top-0 bg-muted/50">
+                                <TableHeader className="sticky top-0 bg-muted/50 backdrop-blur">
                                     <TableRow>
-                                        <TableHead>Invoice No</TableHead>
-                                        <TableHead>Date</TableHead>
-                                        <TableHead>Vendor</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Subtotal</TableHead>
-                                        <TableHead className="text-right">Tax</TableHead>
-                                        <TableHead className="text-right">Total</TableHead>
+                                        <TableHead>
+                                            Invoice No
+                                        </TableHead>
+
+                                        <TableHead>
+                                            Date
+                                        </TableHead>
+
+                                        <TableHead>
+                                            Vendor
+                                        </TableHead>
+
+                                        <TableHead>
+                                            Status
+                                        </TableHead>
+
+                                        <TableHead className="text-right">
+                                            Subtotal
+                                        </TableHead>
+
+                                        <TableHead className="text-right">
+                                            Tax
+                                        </TableHead>
+
+                                        <TableHead className="text-right">
+                                            Total
+                                        </TableHead>
                                     </TableRow>
                                 </TableHeader>
+
                                 <TableBody>
                                     {filteredPurchases.length > 0 ? (
-                                        filteredPurchases.map((purchase) => (
-                                            <TableRow key={purchase.id}>
-                                                <TableCell className="font-mono font-medium">
-                                                    {purchase.invoice_no}
-                                                </TableCell>
-                                                <TableCell>
-                                                    {new Date(purchase.purchase_date).toLocaleDateString('en-IN')}
-                                                </TableCell>
-                                                <TableCell>{purchase.vendor?.name || 'N/A'}</TableCell>
-                                                <TableCell>
-                                                    <Badge
-                                                        variant={purchase.status === 'confirmed' ? 'default' : 'secondary'}
-                                                        className="capitalize"
-                                                    >
-                                                        {purchase.status}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    ₹{formatCurrency(purchase.subtotal)}
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    ₹{formatCurrency(purchase.tax_amount)}
-                                                </TableCell>
-                                                <TableCell className="text-right font-semibold">
-                                                    ₹{formatCurrency(purchase.total_amount)}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
+                                        filteredPurchases.map(
+                                            (purchase) => (
+                                                <TableRow
+                                                    key={
+                                                        purchase.id
+                                                    }
+                                                >
+                                                    <TableCell className="font-mono font-medium">
+                                                        {
+                                                            purchase.invoice_no
+                                                        }
+                                                    </TableCell>
+
+                                                    <TableCell>
+                                                        {dateFormatter.format(
+                                                            new Date(
+                                                                purchase.purchase_date
+                                                            )
+                                                        )}
+                                                    </TableCell>
+
+                                                    <TableCell>
+                                                        {purchase.vendor
+                                                            ?.name ||
+                                                            'N/A'}
+                                                    </TableCell>
+
+                                                    <TableCell>
+                                                        <Badge
+                                                            variant={
+                                                                purchase.status ===
+                                                                'confirmed'
+                                                                    ? 'default'
+                                                                    : 'secondary'
+                                                            }
+                                                            className="capitalize"
+                                                        >
+                                                            {
+                                                                purchase.status
+                                                            }
+                                                        </Badge>
+                                                    </TableCell>
+
+                                                    <TableCell className="text-right">
+                                                        ₹
+                                                        {formatCurrency(
+                                                            purchase.subtotal
+                                                        )}
+                                                    </TableCell>
+
+                                                    <TableCell className="text-right">
+                                                        ₹
+                                                        {formatCurrency(
+                                                            purchase.tax_amount
+                                                        )}
+                                                    </TableCell>
+
+                                                    <TableCell className="text-right font-semibold">
+                                                        ₹
+                                                        {formatCurrency(
+                                                            purchase.total_amount
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            )
+                                        )
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
-                                                No purchases match your filters.
+                                            <TableCell
+                                                colSpan={7}
+                                                className="h-24 text-center text-muted-foreground"
+                                            >
+                                                No purchases match
+                                                your filters.
                                             </TableCell>
                                         </TableRow>
                                     )}
@@ -399,36 +656,74 @@ export default function PurchaseReport({ purchases = [], vendors = [] }: Props) 
                     </CardContent>
                 </Card>
 
-                {/* Vendor-wise Summary */}
+                {/* Vendor Summary */}
                 {filteredPurchases.length > 0 && (
                     <Card>
                         <CardHeader>
-                            <CardTitle>Vendor-wise Summary</CardTitle>
+                            <CardTitle>
+                                Vendor-wise Summary
+                            </CardTitle>
                         </CardHeader>
+
                         <CardContent>
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Vendor Name</TableHead>
-                                        <TableHead className="text-right">Purchase Count</TableHead>
-                                        <TableHead className="text-right">Total Amount</TableHead>
+                                        <TableHead>
+                                            Vendor Name
+                                        </TableHead>
+
+                                        <TableHead className="text-right">
+                                            Purchase Count
+                                        </TableHead>
+
+                                        <TableHead className="text-right">
+                                            Total Amount
+                                        </TableHead>
                                     </TableRow>
                                 </TableHeader>
+
                                 <TableBody>
-                                    {vendorSummary.map(([vendorName, data]) => (
-                                        <TableRow key={`${vendorName}-${data.vendorId}`}>
-                                            <TableCell className="font-medium">{vendorName}</TableCell>
-                                            <TableCell className="text-right">{data.count}</TableCell>
-                                            <TableCell className="text-right font-semibold">
-                                                ₹{formatCurrency(data.total)}
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                    {/* Total Row */}
+                                    {vendorSummary.map(
+                                        ([vendorName, data]) => (
+                                            <TableRow
+                                                key={`${vendorName}-${data.vendorId}`}
+                                            >
+                                                <TableCell className="font-medium">
+                                                    {vendorName}
+                                                </TableCell>
+
+                                                <TableCell className="text-right">
+                                                    {data.count}
+                                                </TableCell>
+
+                                                <TableCell className="text-right font-semibold">
+                                                    ₹
+                                                    {formatCurrency(
+                                                        data.total
+                                                    )}
+                                                </TableCell>
+                                            </TableRow>
+                                        )
+                                    )}
+
                                     <TableRow className="bg-muted/50 font-semibold">
-                                        <TableCell className="font-medium">Total</TableCell>
-                                        <TableCell className="text-right">{summary.totalPurchases}</TableCell>
-                                        <TableCell className="text-right">₹{formatCurrency(summary.totalAmount)}</TableCell>
+                                        <TableCell>
+                                            Total
+                                        </TableCell>
+
+                                        <TableCell className="text-right">
+                                            {
+                                                summary.totalPurchases
+                                            }
+                                        </TableCell>
+
+                                        <TableCell className="text-right">
+                                            ₹
+                                            {formatCurrency(
+                                                summary.totalAmount
+                                            )}
+                                        </TableCell>
                                     </TableRow>
                                 </TableBody>
                             </Table>

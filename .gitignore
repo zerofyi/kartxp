@@ -4,9 +4,6 @@
 /public/build
 /public/hot
 /public/storage
-/public_html/build
-/public_html/hot
-/public_html/storage
 /resources/js/actions
 /resources/js/routes
 /resources/js/wayfinder
@@ -29,4 +26,3 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
-/.github

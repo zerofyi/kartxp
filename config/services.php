@@ -14,6 +14,10 @@ return [
     |
     */
 
+    'sms' => [
+        'provider' => env('SMS_PROVIDER', 'fast2sms'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

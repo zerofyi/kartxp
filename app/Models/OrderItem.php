@@ -14,14 +14,19 @@ class OrderItem extends Model
         'price',
         'discount',
         'tax_percent',
+        'total',
+        'product_snapshot',
     ];
 
     protected $casts = [
-        'quantity' => 'integer',
-        'price' => 'decimal:2',
-        'discount' => 'decimal:2',
-        'tax_percent' => 'decimal:2',
+        'quantity'         => 'integer',
+        'price'            => 'decimal:2',
+        'discount'         => 'decimal:2',
+        'tax_percent'      => 'decimal:2',
+        'total'            => 'decimal:2',
+        'product_snapshot' => 'array',
     ];
+
 
     public function order(): BelongsTo
     {
