@@ -47,7 +47,7 @@ export default function Invoice({ order, warehouse, settings }: Props) {
 
                 const rawHtmlContent = document.getElementById('kartxp-print-viewport')?.innerHTML || '';
                 const config = qz.configs.create(targetPrinter, { scaleContent: false });
-                const renderWidthInches = layout.startsWith('thermal') ? 3.15 : 8.27;
+                const renderWidthInches = layout.startsWith('thermal') ? 3.25 : 8.27;
 
                 const payload = [{
                     type: 'pixel',
