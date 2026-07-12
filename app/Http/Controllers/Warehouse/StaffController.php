@@ -22,7 +22,7 @@ class StaffController extends Controller
      */
     private function currentWarehouseId(): int
     {
-        return Auth::user()->currentWarehouse()->value('warehouses.id')
+        return Auth::user()->ownedWarehouse()->value('warehouses.id')
             ?? abort(403, 'Warehouse session context missing or invalid.');
     }
 

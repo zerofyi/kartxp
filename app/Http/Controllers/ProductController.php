@@ -6,11 +6,11 @@ use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductImage;
 use App\Models\ProductVariant;
-use App\Services\ImageUploadService;
+use App\Services\ImageStorage\ImageStorageException;
+use App\Services\ImageStorage\ImageStorageService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -20,7 +20,8 @@ class ProductController extends Controller
     private const IMAGE_FOLDER = 'Products';
     private const PER_PAGE     = 20;
 
-    public function __construct(protected ImageUploadService $imageUploadService) {}
+    // Correctly inject the ImageStorageService instance
+    public function __construct(protected ImageStorageService $imageStorageService) {}
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -28,40 +29,33 @@ class ProductController extends Controller
 
     private function currentWarehouse()
     {
-        $warehouse = Auth::user()->currentWarehouse();
+        $warehouse = Auth::user()->ownedWarehouse;
         abort_if(! $warehouse, 403, 'No active warehouse selected.');
         return $warehouse;
     }
 
     private function resolveUrl(?string $path): ?string
     {
-        return $path ? Storage::disk('public_html')->url($path) : null;
+        // Leverage the service wrapper to resolve public URLs natively
+        return $this->imageStorageService->url($path);
     }
 
     private function uploadVariantImage($file, string $slug, int $variantId): string
     {
-        $path = $this->imageUploadService->upload(
-            file:   $file,
-            slug:   $slug . '_' . Str::random(6),
-            folder: self::IMAGE_FOLDER . "/{$variantId}",
+        $imageResult = $this->imageStorageService->upload(
+            file:         $file,
+            slug:         $slug . '_' . Str::random(6),
+            folder:       self::IMAGE_FOLDER,
+            allowedTypes: ['image/jpeg', 'image/png', 'image/webp']
         );
 
-        if (! $path) {
-            throw new \RuntimeException('Product image upload failed.');
-        }
-
-        return $path;
+        return $imageResult->path;
     }
 
-    /**
-     * FIX #8: Delete file ONLY outside of transaction, or accept potential orphans.
-     * We collect paths to delete and only call this after a successful commit,
-     * or on rollback for newly-uploaded files (never for pre-existing ones).
-     */
     private function deleteImageFile(?string $path): void
     {
-        if ($path && Storage::disk('public_html')->exists($path)) {
-            Storage::disk('public_html')->delete($path);
+        if ($path) {
+            $this->imageStorageService->delete($path);
         }
     }
 
@@ -109,7 +103,6 @@ class ProductController extends Controller
 
     /**
      * Sync barcodes: delete all then re-create.
-     * FIX #21: Server enforces exactly one primary barcode.
      */
     private function syncBarcodes(ProductVariant $variant, array $barcodesData): void
     {
@@ -123,8 +116,6 @@ class ProductController extends Controller
             return;
         }
 
-        // Ensure exactly one primary: honour the first is_primary=true found,
-        // otherwise force the first entry to be primary.
         $primarySet = false;
         foreach ($filtered as $index => &$data) {
             $wants = (bool) ($data['is_primary'] ?? false);
@@ -152,14 +143,9 @@ class ProductController extends Controller
 
     /**
      * Upload and persist images for a variant.
-     * FIX #7: Uses a locked count so concurrent calls within same request don't collide.
-     *
-     * @param  \Illuminate\Http\UploadedFile[]  $files
-     * @return string[]  Uploaded paths (for rollback cleanup on exception)
      */
     private function storeVariantImages(ProductVariant $variant, array $files): array
     {
-        // Lock the existing count before the loop
         $existingCount = $variant->images()->count();
         $slug          = Str::slug($variant->product->name ?? 'product');
         $paths         = [];
@@ -200,7 +186,7 @@ class ProductController extends Controller
             "{$prefix}.barcodes.*.barcode"    => ['nullable', 'string'],
             "{$prefix}.barcodes.*.is_primary" => ['nullable', 'boolean'],
             "{$prefix}.images"                => ['nullable', 'array', 'max:4'],
-            "{$prefix}.images.*"              => ['image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            "{$prefix}.images.*"              => ['file', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ];
     }
 
@@ -215,7 +201,6 @@ class ProductController extends Controller
             'tax_category_id' => ['required', 'exists:tax_categories,id'],
             'is_active'       => ['boolean'],
             'is_returnable'   => ['boolean'],
-            // FIX #13: variants required with min:1 on store AND update
             'variants'        => ['required', 'array', 'min:1'],
         ];
     }
@@ -307,8 +292,6 @@ class ProductController extends Controller
             $this->productRules(productCodeRule: [
                 Rule::unique('products', 'product_code')->whereNotNull('product_code'),
             ]),
-            // FIX #5: SKU uniqueness enforced at DB level via migration (unique index),
-            // and validated here with Rule::unique for a clean error message.
             ['variants.*.sku' => ['required', 'string', Rule::unique('product_variants', 'sku')]],
             $this->variantRules(),
         ));
@@ -340,9 +323,14 @@ class ProductController extends Controller
             DB::commit();
             return redirect()->back()->with('success', 'Product created successfully.');
 
+        } catch (ImageStorageException $e) {
+            DB::rollBack();
+            foreach ($uploadedPaths as $path) {
+                $this->deleteImageFile($path);
+            }
+            return redirect()->back()->withErrors(['error' => $e->getMessage()]);
         } catch (\Exception $e) {
             DB::rollBack();
-            // FIX #8: Only clean up files we just uploaded (not pre-existing ones).
             foreach ($uploadedPaths as $path) {
                 $this->deleteImageFile($path);
             }
@@ -414,7 +402,7 @@ class ProductController extends Controller
     }
 
     // -----------------------------------------------------------------------
-    // Update  (route key = slug)
+    // Update
     // -----------------------------------------------------------------------
 
     public function update(Request $request, Product $product)
@@ -429,14 +417,12 @@ class ProductController extends Controller
                     ->whereNotNull('product_code'),
             ]),
             [
-                // FIX #6: variant id must belong to THIS product
                 'variants.*.id' => [
                     'nullable',
                     Rule::exists('product_variants', 'id')->where('product_id', $product->id),
                 ],
                 'variants.*.sku'                 => ['required', 'string'],
                 'variants.*.deleted_image_ids'   => ['nullable', 'array'],
-                // FIX #6: deleted image ids must belong to a variant of THIS product
                 'variants.*.deleted_image_ids.*' => [
                     'integer',
                     Rule::exists('product_images', 'id')->where('product_id', $product->id),
@@ -446,8 +432,8 @@ class ProductController extends Controller
         ));
 
         DB::beginTransaction();
-        $uploadedPaths        = [];
-        $pathsToDeleteOnCommit = []; // FIX #8: defer file deletion until after commit
+        $uploadedPaths         = [];
+        $pathsToDeleteOnCommit = [];
         $existingIds          = $product->variants()->pluck('id')->toArray();
         $processedIds         = [];
 
@@ -464,7 +450,6 @@ class ProductController extends Controller
             ]);
 
             foreach ($validated['variants'] as $i => $variantData) {
-                // FIX #5: SKU uniqueness — exclude self when updating an existing variant
                 $skuExists = ProductVariant::where('sku', $variantData['sku'])
                     ->when(! empty($variantData['id']), fn ($q) => $q->where('id', '!=', $variantData['id']))
                     ->exists();
@@ -484,22 +469,19 @@ class ProductController extends Controller
 
                 $this->syncBarcodes($variant, $variantData['barcodes'] ?? []);
 
-                // FIX #8: Collect image paths to delete; only remove files after commit
                 foreach ($variantData['deleted_image_ids'] ?? [] as $imgId) {
-                    // FIX #6: ownership already validated above via Rule::exists
                     $img = ProductImage::where('id', $imgId)
                         ->where('product_variant_id', $variant->id)
                         ->first();
                     if ($img) {
                         $pathsToDeleteOnCommit[] = $img->image_path;
-                        $img->delete(); // DB row deleted inside transaction is safe
+                        $img->delete();
                     }
                 }
 
-                // Upload new images
+                // Upload new images safely
                 $files = $request->file("variants.{$i}.images") ?? [];
                 if ($files) {
-                    // FIX #7: Count only non-deleted persisted images
                     $currentCount = $variant->images()
                         ->whereNotIn('id', $variantData['deleted_image_ids'] ?? [])
                         ->count();
@@ -514,7 +496,6 @@ class ProductController extends Controller
                 $this->reindexImages($variant->id);
             }
 
-            // FIX #13: At least one variant must survive (validated at top, but double-check)
             $toDelete = array_diff($existingIds, $processedIds);
             if (! empty($toDelete)) {
                 $removing = ProductVariant::whereIn('id', $toDelete)->with('images')->get();
@@ -528,16 +509,21 @@ class ProductController extends Controller
 
             DB::commit();
 
-            // FIX #8: Delete files AFTER the transaction has successfully committed
+            // Perform final filesystem removals only after the DB states commit safely
             foreach ($pathsToDeleteOnCommit as $path) {
                 $this->deleteImageFile($path);
             }
 
             return redirect()->back()->with('success', 'Product updated successfully.');
 
+        } catch (ImageStorageException $e) {
+            DB::rollBack();
+            foreach ($uploadedPaths as $path) {
+                $this->deleteImageFile($path);
+            }
+            return redirect()->back()->withErrors(['error' => $e->getMessage()]);
         } catch (\Exception $e) {
             DB::rollBack();
-            // Only roll back files we uploaded in this request
             foreach ($uploadedPaths as $path) {
                 $this->deleteImageFile($path);
             }
@@ -560,9 +546,6 @@ class ProductController extends Controller
 
         $variantId = $image->product_variant_id;
 
-        // FIX #8: Delete DB record inside the implicit transaction first,
-        // then delete file. If file deletion fails the DB is already clean,
-        // which is the preferable orphan direction.
         $path = $image->image_path;
         $image->delete();
         $this->reindexImages($variantId);
@@ -579,7 +562,6 @@ class ProductController extends Controller
 
         $request->validate([
             'image_ids'   => ['required', 'array'],
-            // FIX #6: image ids must belong to this variant
             'image_ids.*' => [
                 'integer',
                 Rule::exists('product_images', 'id')->where('product_variant_id', $variant->id),

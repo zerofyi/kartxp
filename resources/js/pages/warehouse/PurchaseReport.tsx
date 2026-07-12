@@ -1,6 +1,17 @@
 import { Head, router } from '@inertiajs/react';
+import {
+    ArrowLeft,
+    Calendar,
+    DollarSign,
+    Download,
+    FileText,
+    Filter,
+    Layers,
+    Percent,
+    TrendingUp,
+    User,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Download, FileText, Filter } from 'lucide-react';
 
 import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
@@ -76,69 +87,60 @@ export default function PurchaseReport({
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
     const [vendorFilter, setVendorFilter] = useState('all');
-    const [statusFilter, setStatusFilter] = useState<
-        'all' | PurchaseStatus
-    >('all');
+    const [statusFilter, setStatusFilter] = useState<'all' | PurchaseStatus>(
+        'all',
+    );
 
     const currencyFormatter = useMemo(
         () =>
             new Intl.NumberFormat('en-IN', {
+                style: 'currency',
+                currency: 'INR',
                 minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
             }),
-        []
+        [],
     );
 
     const dateFormatter = useMemo(
         () =>
             new Intl.DateTimeFormat('en-IN', {
                 day: '2-digit',
-                month: '2-digit',
+                month: 'short',
                 year: 'numeric',
             }),
-        []
+        [],
     );
-
-    const formatCurrency = (amount: number) =>
-        currencyFormatter.format(amount);
 
     const fromTimestamp = useMemo(() => {
         if (!dateFrom) return null;
-
         const date = new Date(dateFrom);
         date.setHours(0, 0, 0, 0);
-
         return date.getTime();
     }, [dateFrom]);
 
     const toTimestamp = useMemo(() => {
         if (!dateTo) return null;
-
         const date = new Date(dateTo);
         date.setHours(23, 59, 59, 999);
-
         return date.getTime();
     }, [dateTo]);
 
+    // ── Live Client Filtering Compute Logic ──
     const filteredPurchases = useMemo(() => {
         return purchases.filter((purchase) => {
             const purchaseTimestamp = new Date(
-                purchase.purchase_date
+                purchase.purchase_date,
             ).getTime();
 
             const matchesDateFrom =
                 !fromTimestamp || purchaseTimestamp >= fromTimestamp;
-
             const matchesDateTo =
                 !toTimestamp || purchaseTimestamp <= toTimestamp;
-
             const matchesVendor =
                 vendorFilter === 'all' ||
                 String(purchase.vendor_id) === vendorFilter;
-
             const matchesStatus =
-                statusFilter === 'all' ||
-                purchase.status === statusFilter;
+                statusFilter === 'all' || purchase.status === statusFilter;
 
             return (
                 matchesDateFrom &&
@@ -147,19 +149,13 @@ export default function PurchaseReport({
                 matchesStatus
             );
         });
-    }, [
-        purchases,
-        fromTimestamp,
-        toTimestamp,
-        vendorFilter,
-        statusFilter,
-    ]);
+    }, [purchases, fromTimestamp, toTimestamp, vendorFilter, statusFilter]);
 
+    // ── High Performance Aggregation Summaries ──
     const summary = useMemo(() => {
         return filteredPurchases.reduce(
             (acc, purchase) => {
                 acc.totalPurchases += 1;
-
                 acc.totalAmount += purchase.total_amount;
                 acc.totalTax += purchase.tax_amount;
                 acc.totalSubtotal += purchase.subtotal;
@@ -169,7 +165,6 @@ export default function PurchaseReport({
                 } else {
                     acc.draftCount += 1;
                 }
-
                 return acc;
             },
             {
@@ -179,28 +174,32 @@ export default function PurchaseReport({
                 totalSubtotal: 0,
                 confirmedCount: 0,
                 draftCount: 0,
-            }
+            },
         );
     }, [filteredPurchases]);
 
     const vendorSummary = useMemo(() => {
         return Object.entries(
-            filteredPurchases.reduce((acc, purchase) => {
-                const vendorName = purchase.vendor?.name || 'Unknown';
-
-                if (!acc[vendorName]) {
-                    acc[vendorName] = {
-                        count: 0,
-                        total: 0,
-                        vendorId: purchase.vendor_id,
-                    };
-                }
-
-                acc[vendorName].count += 1;
-                acc[vendorName].total += purchase.total_amount;
-
-                return acc;
-            }, {} as Record<string, { count: number; total: number; vendorId: number }>)
+            filteredPurchases.reduce(
+                (acc, purchase) => {
+                    const vendorName =
+                        purchase.vendor?.name || 'Unknown Vendor';
+                    if (!acc[vendorName]) {
+                        acc[vendorName] = {
+                            count: 0,
+                            total: 0,
+                            vendorId: purchase.vendor_id,
+                        };
+                    }
+                    acc[vendorName].count += 1;
+                    acc[vendorName].total += purchase.total_amount;
+                    return acc;
+                },
+                {} as Record<
+                    string,
+                    { count: number; total: number; vendorId: number }
+                >,
+            ),
         ).sort(([nameA], [nameB]) => nameA.localeCompare(nameB));
     }, [filteredPurchases]);
 
@@ -217,48 +216,31 @@ export default function PurchaseReport({
             'Tax',
             'Total',
         ];
-
         const rows = filteredPurchases.map((purchase) => [
             escapeCsv(purchase.invoice_no),
-            escapeCsv(
-                dateFormatter.format(
-                    new Date(purchase.purchase_date)
-                )
-            ),
+            escapeCsv(dateFormatter.format(new Date(purchase.purchase_date))),
             escapeCsv(purchase.vendor?.name),
             escapeCsv(purchase.status),
-            escapeCsv(purchase.subtotal),
-            escapeCsv(purchase.tax_amount),
-            escapeCsv(purchase.total_amount),
+            purchase.subtotal.toFixed(2),
+            purchase.tax_amount.toFixed(2),
+            purchase.total_amount.toFixed(2),
         ]);
 
         const csvContent = [
             headers.join(','),
             ...rows.map((row) => row.join(',')),
         ].join('\n');
-
         const blob = new Blob(['\ufeff' + csvContent], {
             type: 'text/csv;charset=utf-8',
         });
-
         const url = window.URL.createObjectURL(blob);
-
         const link = document.createElement('a');
-
         link.href = url;
-        link.download = `purchase-report-${
-            new Date().toISOString().split('T')[0]
-        }.csv`;
-
+        link.download = `purchase-analytics-report-${new Date().toISOString().split('T')[0]}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-
         window.URL.revokeObjectURL(url);
-    };
-
-    const handlePrint = () => {
-        window.print();
     };
 
     const resetFilters = () => {
@@ -270,52 +252,49 @@ export default function PurchaseReport({
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Purchase Reports" />
+            <Head title="Procurement Intelligence Reports" />
 
-            <div className="flex h-full flex-1 flex-col gap-4 p-4">
-                {/* Header */}
-                <Card className="print:hidden">
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle className="text-2xl">
-                                    Purchase Reports
-                                </CardTitle>
-
-                                <CardDescription>
-                                    Analyze your purchase history and trends
-                                </CardDescription>
-                            </div>
-
-                            <Button
-                                variant="outline"
-                                onClick={() =>
-                                    router.visit(ROUTES.purchases)
-                                }
-                            >
-                                <ArrowLeft className="mr-2 size-4" />
-                                Back to Purchases
-                            </Button>
+            <div className="flex w-full max-w-[100vw] flex-col gap-4 p-6 text-foreground lg:max-w-none">
+                {/* ── Title block actions Header ── */}
+                <Card className="border bg-card text-card-foreground shadow-sm print:hidden">
+                    <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
+                        <div>
+                            <CardTitle className="text-2xl font-bold tracking-tight">
+                                Procurement Statements
+                            </CardTitle>
+                            <CardDescription className="mt-0.5 text-sm font-medium">
+                                Audit historical supply paths, accrued tax
+                                balances, and outflux volumes.
+                            </CardDescription>
                         </div>
-                    </CardHeader>
+                        <Button
+                            variant="outline"
+                            onClick={() => router.visit(ROUTES.purchases)}
+                            className="h-10 bg-card"
+                        >
+                            <ArrowLeft className="mr-2 size-4" /> Back Register
+                        </Button>
+                    </CardContent>
                 </Card>
 
-                {/* Filters */}
-                <Card className="print:hidden">
-                    <CardHeader>
-                        <CardTitle className="flex items-center text-lg">
-                            <Filter className="mr-2 size-5" />
-                            Filter Options
+                {/* ── Balanced Server-Fitted Filters Console Bar ── */}
+                <Card className="border bg-card text-card-foreground shadow-sm print:hidden">
+                    <CardHeader className="border-b pb-3">
+                        <CardTitle className="flex items-center text-sm font-bold tracking-wider text-muted-foreground uppercase">
+                            <Filter className="mr-2 size-4 text-primary" />{' '}
+                            Multi-Variable Filter Console
                         </CardTitle>
                     </CardHeader>
-
-                    <CardContent>
-                        <div className="grid gap-4 md:grid-cols-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="date_from">
+                    <CardContent className="pt-4">
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="space-y-1.5">
+                                <Label
+                                    htmlFor="date_from"
+                                    className="flex items-center gap-1 text-xs font-semibold text-muted-foreground"
+                                >
+                                    <Calendar className="size-3" /> Timeline
                                     Date From
                                 </Label>
-
                                 <Input
                                     id="date_from"
                                     type="date"
@@ -324,329 +303,307 @@ export default function PurchaseReport({
                                         setDateFrom(e.target.value)
                                     }
                                     max={dateTo || undefined}
+                                    className="h-10"
                                 />
                             </div>
 
-                            <div className="space-y-2">
-                                <Label htmlFor="date_to">
+                            <div className="space-y-1.5">
+                                <Label
+                                    htmlFor="date_to"
+                                    className="flex items-center gap-1 text-xs font-semibold text-muted-foreground"
+                                >
+                                    <Calendar className="size-3" /> Timeline
                                     Date To
                                 </Label>
-
                                 <Input
                                     id="date_to"
                                     type="date"
                                     value={dateTo}
-                                    onChange={(e) =>
-                                        setDateTo(e.target.value)
-                                    }
+                                    onChange={(e) => setDateTo(e.target.value)}
                                     min={dateFrom || undefined}
+                                    className="h-10"
                                 />
                             </div>
 
-                            <div className="space-y-2">
-                                <Label htmlFor="vendor">
-                                    Vendor
+                            <div className="space-y-1.5">
+                                <Label
+                                    htmlFor="vendor"
+                                    className="flex items-center gap-1 text-xs font-semibold text-muted-foreground"
+                                >
+                                    <User className="size-3" /> Supplier Vendor
+                                    Filter
                                 </Label>
-
                                 <Select
                                     value={vendorFilter}
                                     onValueChange={setVendorFilter}
                                 >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select vendor" />
+                                    <SelectTrigger className="h-10 border-border bg-card">
+                                        <SelectValue placeholder="All Suppliers" />
                                     </SelectTrigger>
-
                                     <SelectContent>
                                         <SelectItem value="all">
-                                            All Vendors
+                                            All Registered Vendors
                                         </SelectItem>
-
-                                        {vendors.map((vendor) => (
+                                        {vendors.map((v) => (
                                             <SelectItem
-                                                key={vendor.id}
-                                                value={String(vendor.id)}
+                                                key={v.id}
+                                                value={String(v.id)}
                                             >
-                                                {vendor.name}
+                                                {v.name}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
 
-                            <div className="space-y-2">
-                                <Label htmlFor="status">
-                                    Status
+                            <div className="space-y-1.5">
+                                <Label
+                                    htmlFor="status"
+                                    className="flex items-center gap-1 text-xs font-semibold text-muted-foreground"
+                                >
+                                    <Layers className="size-3" /> Lifecycle
+                                    Status Scope
                                 </Label>
-
                                 <Select
                                     value={statusFilter}
                                     onValueChange={(
-                                        value:
-                                            | 'all'
-                                            | PurchaseStatus
-                                    ) =>
-                                        setStatusFilter(value)
-                                    }
+                                        v: 'all' | PurchaseStatus,
+                                    ) => setStatusFilter(v)}
                                 >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select status" />
+                                    <SelectTrigger className="h-10 border-border bg-card">
+                                        <SelectValue placeholder="All Lifecycles" />
                                     </SelectTrigger>
-
                                     <SelectContent>
                                         <SelectItem value="all">
-                                            All Status
+                                            All Lifecycle States
                                         </SelectItem>
-
                                         <SelectItem value="draft">
-                                            Draft
+                                            Draft Forms
                                         </SelectItem>
-
                                         <SelectItem value="confirmed">
-                                            Confirmed
+                                            Confirmed Ledger Ingests
                                         </SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
                         </div>
 
-                        <div className="mt-4 flex gap-2">
+                        <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
                             <Button
                                 variant="outline"
                                 onClick={handleExport}
-                                disabled={
-                                    filteredPurchases.length === 0
-                                }
+                                disabled={filteredPurchases.length === 0}
+                                className="h-9 text-xs font-medium"
                             >
-                                <Download className="mr-2 size-4" />
-                                Export CSV
+                                <Download className="mr-1.5 size-4" /> Export
+                                Spreadsheet CSV
                             </Button>
-
                             <Button
                                 variant="outline"
-                                onClick={handlePrint}
-                                disabled={
-                                    filteredPurchases.length === 0
-                                }
+                                onClick={() => window.print()}
+                                disabled={filteredPurchases.length === 0}
+                                className="h-9 text-xs font-medium"
                             >
-                                <FileText className="mr-2 size-4" />
-                                Print Report
+                                <FileText className="mr-1.5 size-4" /> Print
+                                Statement View
                             </Button>
-
-                            <Button
-                                variant="outline"
-                                onClick={resetFilters}
-                                className="ml-auto"
-                            >
-                                Clear Filters
-                            </Button>
+                            {(dateFrom ||
+                                dateTo ||
+                                vendorFilter !== 'all' ||
+                                statusFilter !== 'all') && (
+                                <Button
+                                    variant="ghost"
+                                    onClick={resetFilters}
+                                    className="ml-auto h-9 text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                    Reset Filters
+                                </Button>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
 
-                {/* Summary Cards */}
-                <div className="grid gap-4 md:grid-cols-4">
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardDescription>
-                                Total Purchases
-                            </CardDescription>
-
-                            <CardTitle className="text-3xl">
-                                {summary.totalPurchases}
-                            </CardTitle>
-                        </CardHeader>
-
-                        <CardContent>
-                            <div className="text-xs text-muted-foreground">
-                                {summary.confirmedCount} confirmed,
-                                {' '}
-                                {summary.draftCount} draft
+                {/* ── Modern Dynamic Analytical Counters Row ── */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
+                        <CardContent className="flex items-center justify-between p-5">
+                            <div className="space-y-0.5">
+                                <span className="block text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                                    Total Invoices
+                                </span>
+                                <div className="font-mono text-2xl font-bold">
+                                    {summary.totalPurchases}
+                                </div>
+                                <span className="block text-[11px] font-medium text-muted-foreground">
+                                    {summary.confirmedCount} confirmed •{' '}
+                                    {summary.draftCount} draft
+                                </span>
+                            </div>
+                            <div className="rounded-full bg-primary/10 p-2.5 text-primary">
+                                <Layers className="size-5" />
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardDescription>
-                                Total Amount
-                            </CardDescription>
-
-                            <CardTitle className="text-3xl">
-                                ₹
-                                {formatCurrency(
-                                    summary.totalAmount
-                                )}
-                            </CardTitle>
-                        </CardHeader>
-
-                        <CardContent>
-                            <div className="text-xs text-muted-foreground">
-                                Across all filtered purchases
+                    <Card className="border-l-4 border-l-emerald-500 bg-card text-card-foreground shadow-sm">
+                        <CardContent className="flex items-center justify-between p-5">
+                            <div className="space-y-0.5">
+                                <span className="block text-xs font-semibold tracking-wider text-emerald-600 uppercase dark:text-emerald-400">
+                                    Total Cost
+                                </span>
+                                <div className="font-mono text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+                                    {currencyFormatter.format(
+                                        summary.totalAmount,
+                                    )}
+                                </div>
+                                <span className="block text-[11px] font-medium text-muted-foreground">
+                                    Gross inventory spending volume
+                                </span>
+                            </div>
+                            <div className="rounded-full bg-emerald-500/10 p-2.5 text-emerald-600 dark:text-emerald-400">
+                                <DollarSign className="size-5" />
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardDescription>
-                                Subtotal
-                            </CardDescription>
-
-                            <CardTitle className="text-3xl">
-                                ₹
-                                {formatCurrency(
-                                    summary.totalSubtotal
-                                )}
-                            </CardTitle>
-                        </CardHeader>
-
-                        <CardContent>
-                            <div className="text-xs text-muted-foreground">
-                                Before taxes
+                    <Card className="border-l-4 border-l-blue-500 bg-card text-card-foreground shadow-sm">
+                        <CardContent className="flex items-center justify-between p-5">
+                            <div className="space-y-0.5">
+                                <span className="block text-xs font-semibold tracking-wider text-blue-600 uppercase dark:text-blue-400">
+                                    Net Subtotal
+                                </span>
+                                <div className="font-mono text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">
+                                    {currencyFormatter.format(
+                                        summary.totalSubtotal,
+                                    )}
+                                </div>
+                                <span className="block text-[11px] font-medium text-muted-foreground">
+                                    Value before tax calculations
+                                </span>
+                            </div>
+                            <div className="rounded-full bg-blue-500/10 p-2.5 text-blue-600 dark:text-blue-400">
+                                <TrendingUp className="size-5" />
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardDescription>
-                                Total Tax
-                            </CardDescription>
-
-                            <CardTitle className="text-3xl">
-                                ₹
-                                {formatCurrency(summary.totalTax)}
-                            </CardTitle>
-                        </CardHeader>
-
-                        <CardContent>
-                            <div className="text-xs text-muted-foreground">
-                                Tax amount paid
+                    {/* CHANGED HERE: Simple terms "Total Tax Paid" instead of "Surcharges Accrued" */}
+                    <Card className="border-l-4 border-l-amber-500 bg-card text-card-foreground shadow-sm">
+                        <CardContent className="flex items-center justify-between p-5">
+                            <div className="space-y-0.5">
+                                <span className="block text-xs font-semibold tracking-wider text-amber-600 uppercase dark:text-amber-400">
+                                    Total Tax Paid
+                                </span>
+                                <div className="font-mono text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
+                                    {currencyFormatter.format(summary.totalTax)}
+                                </div>
+                                <span className="block text-[11px] font-medium text-muted-foreground">
+                                    Accrued government tax amounts
+                                </span>
+                            </div>
+                            <div className="rounded-full bg-amber-500/10 p-2.5 text-amber-600 dark:text-amber-400">
+                                <Percent className="size-5" />
                             </div>
                         </CardContent>
                     </Card>
                 </div>
 
-                {/* Purchase Details */}
-                <Card className="flex-1 overflow-hidden">
-                    <CardHeader>
-                        <CardTitle>
-                            Purchase Details (
-                            {filteredPurchases.length})
+                {/* ── Primary Detailed Invoices Matrix Ledger ── */}
+                <Card className="flex-1 overflow-hidden border bg-card text-card-foreground shadow-sm">
+                    <CardHeader className="border-b bg-muted/20 pb-3">
+                        <CardTitle className="text-lg font-bold tracking-tight">
+                            Purchase History Log ({filteredPurchases.length}{' '}
+                            records)
                         </CardTitle>
                     </CardHeader>
-
                     <CardContent className="p-0">
-                        <div className="max-h-[600px] overflow-auto">
+                        <div className="max-h-[500px] overflow-auto">
                             <Table>
-                                <TableHeader className="sticky top-0 bg-muted/50 backdrop-blur">
+                                <TableHeader className="sticky top-0 z-10 bg-muted backdrop-blur-md">
                                     <TableRow>
-                                        <TableHead>
-                                            Invoice No
+                                        <TableHead className="font-semibold">
+                                            Invoice Identification No
                                         </TableHead>
-
-                                        <TableHead>
-                                            Date
+                                        <TableHead className="font-semibold">
+                                            Transaction Date
                                         </TableHead>
-
-                                        <TableHead>
-                                            Vendor
+                                        <TableHead className="font-semibold">
+                                            Associated Supplier Vendor
                                         </TableHead>
-
-                                        <TableHead>
-                                            Status
+                                        <TableHead className="font-semibold">
+                                            Lifecycle State
                                         </TableHead>
-
-                                        <TableHead className="text-right">
-                                            Subtotal
+                                        <TableHead className="text-right font-semibold">
+                                            Net Subtotal
                                         </TableHead>
-
-                                        <TableHead className="text-right">
-                                            Tax
+                                        <TableHead className="text-right font-semibold">
+                                            Tax Weight
                                         </TableHead>
-
-                                        <TableHead className="text-right">
-                                            Total
+                                        <TableHead className="text-right font-semibold">
+                                            Grand Gross Total
                                         </TableHead>
                                     </TableRow>
                                 </TableHeader>
-
                                 <TableBody>
                                     {filteredPurchases.length > 0 ? (
-                                        filteredPurchases.map(
-                                            (purchase) => (
-                                                <TableRow
-                                                    key={
-                                                        purchase.id
-                                                    }
-                                                >
-                                                    <TableCell className="font-mono font-medium">
-                                                        {
-                                                            purchase.invoice_no
+                                        filteredPurchases.map((purchase) => (
+                                            <TableRow
+                                                key={purchase.id}
+                                                className="border-b transition-colors hover:bg-muted/30"
+                                            >
+                                                <TableCell className="font-mono font-bold text-primary">
+                                                    {purchase.invoice_no}
+                                                </TableCell>
+                                                <TableCell className="whitespace-nowrap">
+                                                    {dateFormatter.format(
+                                                        new Date(
+                                                            purchase.purchase_date,
+                                                        ),
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="font-medium">
+                                                    {purchase.vendor?.name ??
+                                                        'Unknown / N/A'}
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Badge
+                                                        variant={
+                                                            purchase.status ===
+                                                            'confirmed'
+                                                                ? 'default'
+                                                                : 'secondary'
                                                         }
-                                                    </TableCell>
-
-                                                    <TableCell>
-                                                        {dateFormatter.format(
-                                                            new Date(
-                                                                purchase.purchase_date
-                                                            )
-                                                        )}
-                                                    </TableCell>
-
-                                                    <TableCell>
-                                                        {purchase.vendor
-                                                            ?.name ||
-                                                            'N/A'}
-                                                    </TableCell>
-
-                                                    <TableCell>
-                                                        <Badge
-                                                            variant={
-                                                                purchase.status ===
-                                                                'confirmed'
-                                                                    ? 'default'
-                                                                    : 'secondary'
-                                                            }
-                                                            className="capitalize"
-                                                        >
-                                                            {
-                                                                purchase.status
-                                                            }
-                                                        </Badge>
-                                                    </TableCell>
-
-                                                    <TableCell className="text-right">
-                                                        ₹
-                                                        {formatCurrency(
-                                                            purchase.subtotal
-                                                        )}
-                                                    </TableCell>
-
-                                                    <TableCell className="text-right">
-                                                        ₹
-                                                        {formatCurrency(
-                                                            purchase.tax_amount
-                                                        )}
-                                                    </TableCell>
-
-                                                    <TableCell className="text-right font-semibold">
-                                                        ₹
-                                                        {formatCurrency(
-                                                            purchase.total_amount
-                                                        )}
-                                                    </TableCell>
-                                                </TableRow>
-                                            )
-                                        )
+                                                        className={`capitalize ${purchase.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'}`}
+                                                    >
+                                                        {purchase.status}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-right font-mono text-muted-foreground">
+                                                    {currencyFormatter.format(
+                                                        purchase.subtotal,
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="text-right font-mono text-muted-foreground">
+                                                    {currencyFormatter.format(
+                                                        purchase.tax_amount,
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="text-right font-mono font-bold text-foreground">
+                                                    {currencyFormatter.format(
+                                                        purchase.total_amount,
+                                                    )}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
                                     ) : (
                                         <TableRow>
                                             <TableCell
                                                 colSpan={7}
-                                                className="h-24 text-center text-muted-foreground"
+                                                className="h-32 bg-muted/10 text-center font-medium text-muted-foreground"
                                             >
-                                                No purchases match
-                                                your filters.
+                                                No tracked purchase manifest
+                                                packages matched filter console
+                                                parameters.
                                             </TableCell>
                                         </TableRow>
                                     )}
@@ -656,72 +613,58 @@ export default function PurchaseReport({
                     </CardContent>
                 </Card>
 
-                {/* Vendor Summary */}
+                {/* ── Distinct Supplier Vendor Aggregate Matrix ── */}
                 {filteredPurchases.length > 0 && (
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>
-                                Vendor-wise Summary
+                    <Card className="break-inside-avoid border bg-card text-card-foreground shadow-sm">
+                        <CardHeader className="border-b bg-muted/20 pb-3">
+                            <CardTitle className="text-base font-bold tracking-tight">
+                                Supplier Volume Breakdowns
                             </CardTitle>
                         </CardHeader>
-
-                        <CardContent>
+                        <CardContent className="p-0">
                             <Table>
-                                <TableHeader>
+                                <TableHeader className="bg-muted/30">
                                     <TableRow>
-                                        <TableHead>
-                                            Vendor Name
+                                        <TableHead className="font-semibold">
+                                            Vendor Entity Name
                                         </TableHead>
-
-                                        <TableHead className="text-right">
-                                            Purchase Count
+                                        <TableHead className="text-right font-semibold">
+                                            Bill Count Volume
                                         </TableHead>
-
-                                        <TableHead className="text-right">
-                                            Total Amount
+                                        <TableHead className="text-right font-semibold">
+                                            Accumulated Financial Outflux Total
                                         </TableHead>
                                     </TableRow>
                                 </TableHeader>
-
                                 <TableBody>
-                                    {vendorSummary.map(
-                                        ([vendorName, data]) => (
-                                            <TableRow
-                                                key={`${vendorName}-${data.vendorId}`}
-                                            >
-                                                <TableCell className="font-medium">
-                                                    {vendorName}
-                                                </TableCell>
-
-                                                <TableCell className="text-right">
-                                                    {data.count}
-                                                </TableCell>
-
-                                                <TableCell className="text-right font-semibold">
-                                                    ₹
-                                                    {formatCurrency(
-                                                        data.total
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        )
-                                    )}
-
-                                    <TableRow className="bg-muted/50 font-semibold">
+                                    {vendorSummary.map(([vendorName, data]) => (
+                                        <TableRow
+                                            key={`${vendorName}-${data.vendorId}`}
+                                            className="border-b transition-colors hover:bg-muted/20"
+                                        >
+                                            <TableCell className="font-semibold text-foreground">
+                                                {vendorName}
+                                            </TableCell>
+                                            <TableCell className="text-right font-mono font-medium">
+                                                {data.count} orders
+                                            </TableCell>
+                                            <TableCell className="text-right font-mono font-bold text-primary">
+                                                {currencyFormatter.format(
+                                                    data.total,
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                    <TableRow className="border-t-2 bg-muted/60 font-bold text-foreground">
                                         <TableCell>
-                                            Total
+                                            Consolidated Summary Evaluation
                                         </TableCell>
-
-                                        <TableCell className="text-right">
-                                            {
-                                                summary.totalPurchases
-                                            }
+                                        <TableCell className="text-right font-mono">
+                                            {summary.totalPurchases} orders
                                         </TableCell>
-
-                                        <TableCell className="text-right">
-                                            ₹
-                                            {formatCurrency(
-                                                summary.totalAmount
+                                        <TableCell className="text-right font-mono text-base text-primary">
+                                            {currencyFormatter.format(
+                                                summary.totalAmount,
                                             )}
                                         </TableCell>
                                     </TableRow>

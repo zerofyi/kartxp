@@ -5,7 +5,7 @@ use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\PosController;
 use App\Http\Controllers\PurchaseController;
-use App\Http\Controllers\SalesController;
+use App\Http\Controllers\Warehouse\SalesController;
 use App\Http\Controllers\VendorController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\ProductController;
@@ -16,14 +16,18 @@ use App\Http\Controllers\Warehouse\StaffController;
 use App\Http\Controllers\Warehouse\AccountingController;
 use App\Http\Controllers\Warehouse\SettingsController as WHSettingsController;
 use App\Http\Controllers\Warehouse\BarcodeController as WHBarcodeController;
-use App\Http\Controllers\Warehouse\InventoryController as WHInventoryController;
+use App\Http\Controllers\Warehouse\AnalyticsEngineController;
 use App\Http\Controllers\Warehouse\DashboardController;
+use App\Models\ProductImage;
+use App\Services\ImageStorage\ImageStorageService;
 use Inertia\Inertia;
 
-Route::middleware(['auth', 'verified', 'warehouse'])->name('warehouse.')->prefix('warehouse')->group(function () {
-    // Dashboard
-    Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
+Route::middleware(['auth', 'verified', 'check:warehouse'])
+    ->name('warehouse.')
+    ->prefix('warehouse')
+    ->group(function () {
 
+    Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::resource('categories', CategoryController::class)->only(['index', 'store', 'update']);
     Route::resource('brands', BrandController::class)->only(['index', 'store', 'update']);
     Route::resource('products', ProductController::class)->only(['index', 'store', 'update']);
@@ -55,6 +59,7 @@ Route::middleware(['auth', 'verified', 'warehouse'])->name('warehouse.')->prefix
 
     // POS
     Route::get('/pos', [SalesController::class, 'index'])->name('pos.index');
+    Route::get('/pos/display', [PosController::class, 'index'])->name('warehouse.pos.display');
     // Sales CRUD
     Route::get('/sales', [SalesController::class, 'list'])->name('sales.index');
     Route::post('/sales', [SalesController::class, 'store'])->name('sales.store');
@@ -62,6 +67,7 @@ Route::middleware(['auth', 'verified', 'warehouse'])->name('warehouse.')->prefix
     Route::get('/sales/{id}/edit', [SalesController::class, 'edit'])->name('sales.edit');
     Route::put('/sales/{id}', [SalesController::class, 'update'])->name('sales.update');
     Route::get('/sales/{id}/print', [SalesController::class, 'print'])->name('sales.print');
+    Route::get('/next-invoice', [SalesController::class, 'nextInvoice'])->name('next-invoice');
 
     //Route::get('/import-products', [PosController::class, 'import'])->name('import.products');
 
@@ -143,12 +149,71 @@ Route::middleware(['auth', 'verified', 'warehouse'])->name('warehouse.')->prefix
         Route::get('/jobs/{job}/pdf', [WHBarcodeController::class, 'generatePdf'])->name('job.pdf');
     });
 
-    // Enhanced Inventory
-    Route::prefix('inventory-advanced')->name('inventory-advanced.')->group(function () {
-        Route::post('/stock-count', [WHInventoryController::class, 'stockCount'])->name('stock-count');
-        Route::get('/low-stock-report', [WHInventoryController::class, 'lowStockReport'])->name('low-stock');
-        Route::get('/expiring-report', [WHInventoryController::class, 'expiringReport'])->name('expiring');
-        Route::get('/dead-stock-report', [WHInventoryController::class, 'deadStockReport'])->name('dead-stock');
-        Route::get('/ledger', [WHInventoryController::class, 'ledger'])->name('ledger');
+    // Universal Enterprise Analytics & Reporting Engine
+    Route::prefix('analytics-engine')->name('analytics-engine.')->group(function () {
+        // Core Modules
+        Route::get('/dashboard', [AnalyticsEngineController::class, 'dashboard'])->name('dashboard');
+
+        // 1. Inventory & Stock Intelligence
+        Route::get('/stock-intelligence/reorder-velocity', [AnalyticsEngineController::class, 'reorderVelocity'])->name('stock.reorder');
+        Route::get('/stock-intelligence/batch-lifecycle', [AnalyticsEngineController::class, 'batchLifecycle'])->name('stock.lifecycle');
+        Route::get('/stock-intelligence/valuation-audit', [AnalyticsEngineController::class, 'valuationAudit'])->name('stock.valuation');
+
+        // 2. Sales & Channel Performance
+        Route::get('/sales-channels/omnichannel', [AnalyticsEngineController::class, 'omnichannelPerformance'])->name('sales.omnichannel');
+        Route::get('/sales-channels/product-margins', [AnalyticsEngineController::class, 'productMargins'])->name('sales.margins');
+
+        // 3. Operations & Fulfillment Metrics
+        Route::get('/operations/fulfillment-kpi', [AnalyticsEngineController::class, 'fulfillmentKpi'])->name('ops.fulfillment');
+        Route::get('/operations/returns-analysis', [AnalyticsEngineController::class, 'returnsAnalysis'])->name('ops.returns');
+
+        // 4. Localized Warehouse Financials
+        Route::get('/financials/profit-loss', [AnalyticsEngineController::class, 'profitLoss'])->name('finance.pl');
+        Route::get('/financials/tax-ledger', [AnalyticsEngineController::class, 'taxLedger'])->name('finance.tax');
+    });
+
+
+    Route::prefix('maintenance')->name('maintenance')->group(function () {
+
+        Route::post('/pos/clear-cache', [PosController::class, 'flushCache'])->name('pos.clear-cache');
+        Route::post('/dashboard/clear-cache', [DashboardController::class, 'clearCache'])->name('warehouse.cache.clear');
+
+        Route::get('/migrate-product-images', function (ImageStorageService $storageService) {
+            // Target base path constant matching the schema configuration[cite: 1]
+            $baseFolder = 'Products/Variants';
+
+            $images = ProductImage::whereNotNull('image_path')->get();
+
+            $metrics = ['processed' => 0, 'updated' => 0, 'failed' => 0];
+
+            foreach ($images as $image) {
+                $metrics['processed']++;
+
+                DB::beginTransaction();
+                try {
+                    // Process file movement and thumbnail execution simultaneously
+                    $newPath = $storageService->migrateAndBuildThumbnail($image->image_path, $baseFolder);
+
+                    if ($newPath) {
+                        $image->update(['image_path' => $newPath]);
+                        $metrics['updated']++;
+                        DB::commit();
+                    } else {
+                        DB::rollBack();
+                        $metrics['failed']++;
+                    }
+                } catch (\Throwable $e) {
+                    DB::rollBack();
+                    $metrics['failed']++;
+                    \Log::error("Failed structural migration processing ID {$image->id}: " . $e->getMessage());
+                }
+            }
+
+            return response()->json([
+                'status' => 'Success',
+                'message' => 'Legacy ID folders eliminated and uniform thumbnails generated.',
+                'metrics' => $metrics
+            ]);
+        });
     });
 });

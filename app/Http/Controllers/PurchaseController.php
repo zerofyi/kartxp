@@ -11,45 +11,109 @@ use App\Models\StockSnapshot;
 use App\Models\TaxCategory;
 use App\Models\Vendor;
 use App\Models\Warehouse;
+use App\Services\ImageStorage\ImageStorageException;
+use App\Services\ImageStorage\ImageStorageService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class PurchaseController extends Controller
 {
-    /** Disk used for invoice images — one place to change if it ever moves. */
-    private const IMAGE_DISK = 'public_html';
+    private const IMAGE_FOLDER = 'Invoices';
+    private const PER_PAGE     = 20;
+
+    public function __construct(protected ImageStorageService $imageStorageService) {}
 
     // ─────────────────────────────────────────────────────────────
     // INDEX
     // ─────────────────────────────────────────────────────────────
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        $purchases = Purchase::with([
+        // 1. Capture dynamic filter parameters
+        $search     = $request->string('search')->trim();
+        $status     = $request->string('status')->trim();
+        $vendorId   = $request->input('vendor_id');
+        $warehouseId = $request->input('warehouse_id');
+        $startDate  = $request->input('start_date');
+        $endDate    = $request->input('end_date');
+        $perPage    = $request->integer('per_page', self::PER_PAGE);
+
+        // 2. Build performance-optimized query builder scope
+        $query = Purchase::with([
             'vendor:id,name,phone',
             'items.productVariant.product:id,name',
             'items.productVariant.unit:id,symbol',
             'items.taxCategory:id,name,tax_percent,type',
             'createdBy:id,name',
-        ])
-            ->latest()
-            ->get();
+        ]);
 
-        $warehouses = Warehouse::where('user_id', Auth::id())
-            ->orderBy('name')
-            ->get(['id', 'name', 'location']);
+        // Apply filters directly at the Database level
+        $query->when($search, function ($q) use ($search) {
+            $q->where(function ($inner) use ($search) {
+                $inner->where('invoice_no', 'like', "%{$search}%")
+                      ->orWhereHas('vendor', fn($v) => $v->where('name', 'like', "%{$search}%"));
+            });
+        });
+
+        $query->when($status->isNotEmpty() && $status->toString() !== 'all', fn($q) => $q->where('status', $status));
+        $query->when($vendorId, fn($q) => $q->where('vendor_id', $vendorId));
+        $query->when($warehouseId, fn($q) => $q->where('warehouse_id', $warehouseId));
+        $query->when($startDate, fn($q) => $q->whereDate('purchase_date', '>=', $startDate));
+        $query->when($endDate, fn($q) => $q->whereDate('purchase_date', '<=', $endDate));
+
+        // 3. Compute High-Performance Aggregated KPI Meta-Metrics for Summary Cards
+        $statsQuery = clone $query;
+        $stats = $statsQuery->selectRaw("
+            COUNT(id) as total_count,
+            SUM(CASE WHEN status = 'confirmed' THEN total_amount ELSE 0 END) as confirmed_total,
+            SUM(CASE WHEN status = 'draft' THEN total_amount ELSE 0 END) as draft_total,
+            SUM(total_amount) as grand_total
+        ")->first();
+
+        // 4. Paginate final dataset records efficiently
+        $purchases = $query->latest()
+            ->paginate($perPage)
+            ->withQueryString()
+            ->through(fn($p) => [
+                'id'            => $p->id,
+                'vendor_id'     => $p->vendor_id,
+                'vendor'        => $p->vendor,
+                'invoice_no'    => $p->invoice_no,
+                'image_url'     => $this->imageStorageService->url($p->image_path),
+                'purchase_date' => $p->purchase_date?->format('Y-m-d'),
+                'subtotal'      => (float) $p->subtotal,
+                'tax_amount'    => (float) $p->tax_amount,
+                'total_amount'  => (float) $p->total_amount,
+                'status'        => $p->status,
+                'created_at'    => $p->created_at?->toISOString(),
+                'items_count'   => $p->items->count(),
+            ]);
 
         return Inertia::render('Warehouse/PurchaseList', [
             'purchases'  => $purchases,
-            'warehouses' => $warehouses,
+            'vendors'    => Vendor::where('user_id', Auth::id())->orderBy('name')->get(['id', 'name']),
+            'warehouses' => Warehouse::where('user_id', Auth::id())->orderBy('name')->get(['id', 'name', 'location']),
+            'stats' => [
+                'total_count'     => (int) ($stats->total_count ?? 0),
+                'confirmed_total' => (float) ($stats->confirmed_total ?? 0),
+                'draft_total'     => (float) ($stats->draft_total ?? 0),
+                'grand_total'     => (float) ($stats->grand_total ?? 0),
+            ],
+            'filters' => [
+                'search'       => $search->toString(),
+                'status'       => $status->toString() ?: 'all',
+                'vendor_id'    => $vendorId,
+                'warehouse_id' => $warehouseId,
+                'start_date'   => $startDate,
+                'end_date'     => $endDate,
+                'per_page'     => $perPage,
+            ]
         ]);
     }
 
@@ -77,16 +141,23 @@ class PurchaseController extends Controller
             'invoice_no' => 'required|string|unique:purchases,invoice_no',
         ]));
 
-        // Eager-load all tax categories referenced in this request — avoids N+1
         $taxMap = $this->loadTaxMap($validated['items']);
 
         DB::beginTransaction();
+        $imagePath = null;
+
         try {
             [$subtotal, $taxAmount] = $this->calculateTotals($validated['items'], $taxMap);
 
-            $imagePath = $request->hasFile('invoice_image')
-                ? $this->uploadImage($request->file('invoice_image'), $validated['invoice_no'])
-                : null;
+            if ($request->hasFile('invoice_image')) {
+                $imageResult = $this->imageStorageService->upload(
+                    file: $request->file('invoice_image'),
+                    slug: Str::slug($validated['invoice_no']),
+                    folder: self::IMAGE_FOLDER,
+                    allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] // Add PDF if your service config allows it
+                );
+                $imagePath = $imageResult->path;
+            }
 
             $purchase = Purchase::create([
                 'vendor_id'     => $validated['vendor_id'],
@@ -111,13 +182,16 @@ class PurchaseController extends Controller
 
             DB::commit();
             return redirect()->route('warehouse.purchases.index')->with('success', 'Purchase created successfully.');
+
+        } catch (ImageStorageException $e) {
+            DB::rollBack();
+            if ($imagePath) { $this->imageStorageService->delete($imagePath); }
+            return redirect()->back()->withErrors(['form' => $e->getMessage()])->withInput();
         } catch (\Throwable $e) {
             DB::rollBack();
-            if (isset($imagePath) && $imagePath) {
-                Storage::disk(self::IMAGE_DISK)->delete($imagePath);
-            }
+            if ($imagePath) { $this->imageStorageService->delete($imagePath); }
             Log::error('Purchase store failed', ['error' => $e->getMessage(), 'user' => Auth::id()]);
-            return redirect()->back()->withErrors(['form' => 'Failed to create purchase. Please try again.'])->withInput();
+            return redirect()->back()->withErrors(['form' => 'Failed to create purchase: ' . $e->getMessage()])->withInput();
         }
     }
 
@@ -126,60 +200,42 @@ class PurchaseController extends Controller
     // ─────────────────────────────────────────────────────────────
 
     public function show(Purchase $purchase): Response
-{
-    $purchase->load([
-        'vendor:id,name,phone,gstin,email,address',
-        'items.taxCategory:id,name,tax_percent,type',
-        'items.productVariant.product:id,name',
-    ]);
+    {
+        $purchase->load([
+            'vendor:id,name,phone,gstin,email,address',
+            'items.taxCategory:id,name,tax_percent,type',
+            'items.productVariant.product:id,name',
+        ]);
 
-    return Inertia::render('Warehouse/ViewPurchase', [
-        'purchase' => [
-            'id' => $purchase->id,
-            'vendor_id' => $purchase->vendor_id,
-            'invoice_no' => $purchase->invoice_no,
-            'image_path' => $purchase->image_path,
-            'purchase_date' => $purchase->purchase_date?->format('Y-m-d'),
-            'subtotal' => (float) $purchase->subtotal,
-            'tax_amount' => (float) $purchase->tax_amount,
-            'total_amount' => (float) $purchase->total_amount,
-            'status' => $purchase->status,
-            'created_at' => $purchase->created_at?->toISOString(),
-
-            'vendor' => $purchase->vendor ? [
-                'id' => $purchase->vendor->id,
-                'name' => $purchase->vendor->name,
-                'phone' => $purchase->vendor->phone,
-                'gstin' => $purchase->vendor->gstin,
-                'email' => $purchase->vendor->email,
-                'address' => $purchase->vendor->address,
-            ] : null,
-
-            'items' => $purchase->items->map(fn ($item) => [
-                'id' => $item->id,
-                'product_variant_id' => $item->product_variant_id,
-
-                'product_name' => $item->productVariant?->product?->name,
-
-                'quantity' => (float) $item->quantity,
-                'cost_price' => (float) $item->cost_price,
-                'selling_price' => (float) $item->selling_price,
-                'mrp' => (float) $item->mrp,
-
-                'tax_id' => $item->tax_id,
-                'batch_no' => $item->batch_no,
-                'expiry_date' => $item->expiry_date,
-
-                'tax_category' => $item->taxCategory ? [
-                    'id' => $item->taxCategory->id,
-                    'name' => $item->taxCategory->name,
-                    'tax_percent' => (float) $item->taxCategory->tax_percent,
-                    'type' => $item->taxCategory->type,
-                ] : null,
-            ])->values(),
-        ],
-    ]);
-}
+        return Inertia::render('Warehouse/ViewPurchase', [
+            'purchase' => [
+                'id' => $purchase->id,
+                'vendor_id' => $purchase->vendor_id,
+                'invoice_no' => $purchase->invoice_no,
+                'image_url' => $this->imageStorageService->url($purchase->image_path),
+                'purchase_date' => $purchase->purchase_date?->format('Y-m-d'),
+                'subtotal' => (float) $purchase->subtotal,
+                'tax_amount' => (float) $purchase->tax_amount,
+                'total_amount' => (float) $purchase->total_amount,
+                'status' => $purchase->status,
+                'created_at' => $purchase->created_at?->toISOString(),
+                'vendor' => $purchase->vendor,
+                'items' => $purchase->items->map(fn ($item) => [
+                    'id' => $item->id,
+                    'product_variant_id' => $item->product_variant_id,
+                    'product_name' => $item->productVariant?->product?->name,
+                    'quantity' => (float) $item->quantity,
+                    'cost_price' => (float) $item->cost_price,
+                    'selling_price' => (float) $item->selling_price,
+                    'mrp' => (float) $item->mrp,
+                    'tax_id' => $item->tax_id,
+                    'batch_no' => $item->batch_no,
+                    'expiry_date' => $item->expiry_date,
+                    'tax_category' => $item->taxCategory,
+                ])->values(),
+            ],
+        ]);
+    }
 
     // ─────────────────────────────────────────────────────────────
     // EDIT
@@ -224,13 +280,16 @@ class PurchaseController extends Controller
         try {
             [$subtotal, $taxAmount] = $this->calculateTotals($validated['items'], $taxMap);
 
-            // Handle image replacement
             $imagePath = $purchase->image_path;
             if ($request->hasFile('invoice_image')) {
-                if ($imagePath) {
-                    Storage::disk(self::IMAGE_DISK)->delete($imagePath);
-                }
-                $imagePath = $this->uploadImage($request->file('invoice_image'), $validated['invoice_no']);
+                $imageResult = $this->imageStorageService->replace(
+                    file: $request->file('invoice_image'),
+                    slug: Str::slug($validated['invoice_no']),
+                    folder: self::IMAGE_FOLDER,
+                    existingPath: $purchase->image_path,
+                    allowedTypes: ['image/jpeg', 'image/png', 'image/webp']
+                );
+                $imagePath = $imageResult->path;
             }
 
             $purchase->update([
@@ -269,6 +328,9 @@ class PurchaseController extends Controller
 
             DB::commit();
             return redirect()->route('warehouse.purchases.index')->with('success', 'Purchase updated successfully.');
+        } catch (ImageStorageException $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors(['form' => $e->getMessage()]);
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('Purchase update failed', ['purchase' => $purchase->id, 'error' => $e->getMessage()]);
@@ -323,7 +385,7 @@ class PurchaseController extends Controller
         DB::beginTransaction();
         try {
             if ($purchase->image_path) {
-                Storage::disk(self::IMAGE_DISK)->delete($purchase->image_path);
+                $this->imageStorageService->delete($purchase->image_path);
             }
 
             $purchase->delete();
@@ -338,25 +400,46 @@ class PurchaseController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────
-    // REPORT
+    // REPORT – Scoped, Clean, and Highly Optimized
     // ─────────────────────────────────────────────────────────────
-
-    public function report(): Response
+    public function report(Request $request): Response
     {
-        // withCount avoids loading item collections just to count them
-        $purchases = Purchase::with(['vendor:id,name,phone'])
+        $warehouse = Auth::user()->ownedWarehouse;
+        $warehouseId = $warehouse ? $warehouse->id : null;
+
+        $startDate = $request->input('start_date');
+        $endDate   = $request->input('end_date');
+        $vendorId  = $request->input('vendor_id');
+        $status    = $request->string('status')->trim();
+
+        $query = Purchase::with(['vendor:id,name,phone'])
             ->withCount('items')
-            ->latest()
+            ->select(['id', 'vendor_id', 'invoice_no', 'purchase_date', 'subtotal', 'tax_amount', 'total_amount', 'status']);
+
+        // Enforce strong warehouse safety boundary box limits
+        if ($warehouseId) {
+            $query->where('warehouse_id', $warehouseId);
+        }
+
+        // Apply filters directly at the database level before loading into memory
+        $query->when($startDate, fn($q) => $q->whereDate('purchase_date', '>=', $startDate));
+        $query->when($endDate,   fn($q) => $q->whereDate('purchase_date', '<=', $endDate));
+        $query->when($vendorId,  fn($q) => $q->where('vendor_id', $vendorId));
+        $query->when($status->isNotEmpty() && $status->toString() !== 'all', fn($q) => $q->where('status', $status));
+
+        // Limit the maximum number of rows returned to prevent system memory exhaustion
+        $purchases = $query->latest('purchase_date')
+            ->take(2500)
             ->get()
             ->map(fn ($p) => [
                 'id'            => $p->id,
                 'vendor_id'     => $p->vendor_id,
                 'vendor'        => $p->vendor,
                 'invoice_no'    => $p->invoice_no,
-                'purchase_date' => $p->purchase_date,
-                'subtotal'      => $p->subtotal,
-                'tax_amount'    => $p->tax_amount,
-                'total_amount'  => $p->total_amount,
+                'purchase_date' => $p->purchase_date?->format('Y-m-d'),
+                'subtotal'      => (float) $p->subtotal,
+                'tax_amount'    => (float) $p->tax_amount,
+                'total_amount'  => (float) $p->total_amount,
                 'status'        => $p->status,
                 'items_count'   => $p->items_count,
             ]);
@@ -364,87 +447,62 @@ class PurchaseController extends Controller
         return Inertia::render('Warehouse/PurchaseReport', [
             'purchases' => $purchases,
             'vendors'   => Vendor::where('user_id', Auth::id())->orderBy('name')->get(['id', 'name', 'phone']),
+            'filters'   => [
+                'start_date' => $startDate,
+                'end_date'   => $endDate,
+                'vendor_id'  => $vendorId,
+                'status'     => $status->toString() ?: 'all',
+            ]
         ]);
     }
 
     // ─────────────────────────────────────────────────────────────
-    // PRIVATE HELPERS
+    // STRIPPED INTERNAL IMPLEMENTATIONS
     // ─────────────────────────────────────────────────────────────
 
-    /**
-     * Shared validation rules for store/update.
-     * Caller passes overrides for invoice_no uniqueness and optional items.*.id.
-     */
     private function itemRules(array $overrides = []): array
     {
         return array_merge([
-            'vendor_id'                      => 'required|exists:vendors,id',
-            'purchase_date'                  => 'required|date',
-            'warehouse_id'                   => 'required|exists:warehouses,id',
-            'invoice_image'                  => 'nullable|image|max:5120',
-            'items'                          => 'required|array|min:1',
-            'items.*.product_variant_id'     => 'required|exists:product_variants,id',
-            'items.*.quantity'               => 'required|integer|min:1',
-            'items.*.cost_price'             => 'required|numeric|min:0',
-            'items.*.min_selling_price'      => 'required|numeric|min:0',
-            'items.*.selling_price'          => 'required|numeric|min:0',
-            'items.*.mrp'                    => 'required|numeric|min:0',
-            'items.*.tax_id'                 => 'required|exists:tax_categories,id',
-            'items.*.batch_no'               => 'required|string',
-            'items.*.expiry_date'            => 'nullable|date|after:today',
-            'status'                         => 'required|in:draft,confirmed',
+            'vendor_id'                  => 'required|exists:vendors,id',
+            'purchase_date'              => 'required|date',
+            'warehouse_id'               => 'required|exists:warehouses,id',
+            'invoice_image'              => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
+            'items'                      => 'required|array|min:1',
+            'items.*.product_variant_id' => 'required|exists:product_variants,id',
+            'items.*.quantity'           => 'required|integer|min:1',
+            'items.*.cost_price'         => 'required|numeric|min:0',
+            'items.*.min_selling_price'  => 'required|numeric|min:0',
+            'items.*.selling_price'      => 'required|numeric|min:0',
+            'items.*.mrp'                => 'required|numeric|min:0',
+            'items.*.tax_id'             => 'required|exists:tax_categories,id',
+            'items.*.batch_no'           => 'required|string',
+            'items.*.expiry_date'        => 'nullable|date|after:today',
+            'status'                     => 'required|in:draft,confirmed',
         ], $overrides);
     }
 
-    /**
-     * Load all TaxCategory records referenced in the items array — one query total.
-     *
-     * @param  array<int, array<string, mixed>>  $items
-     * @return array<int, TaxCategory>  keyed by id
-     */
-    private function loadTaxMap(array $items): array
-    {
+    private function loadTaxMap(array $items): array {
         $ids = array_unique(array_column($items, 'tax_id'));
         return TaxCategory::whereIn('id', $ids)->get()->keyBy('id')->all();
     }
 
-    /**
-     * Calculate subtotal and tax from items, using a pre-loaded tax map.
-     *
-     * @param  array<int, TaxCategory>  $taxMap
-     * @return array{float, float}  [$subtotal, $taxAmount]
-     */
-    private function calculateTotals(array $items, array $taxMap): array
-    {
-        $subtotal  = 0.0;
-        $taxAmount = 0.0;
-
+    private function calculateTotals(array $items, array $taxMap): array {
+        $subtotal = 0.0; $taxAmount = 0.0;
         foreach ($items as $item) {
             $taxCategory = $taxMap[$item['tax_id']] ?? null;
             $lineTotal   = (float) $item['quantity'] * (float) $item['cost_price'];
-
             if ($taxCategory?->type === 'inclusive') {
-                $base       = $lineTotal / (1 + ($taxCategory->tax_percent / 100));
-                $subtotal  += $base;
-                $taxAmount += $lineTotal - $base;
+                $base = $lineTotal / (1 + ($taxCategory->tax_percent / 100));
+                $subtotal += $base; $taxAmount += $lineTotal - $base;
             } else {
-                $tax        = $taxCategory ? ($lineTotal * $taxCategory->tax_percent / 100) : 0;
-                $subtotal  += $lineTotal;
-                $taxAmount += $tax;
+                $tax = $taxCategory ? ($lineTotal * $taxCategory->tax_percent / 100) : 0;
+                $subtotal += $lineTotal; $taxAmount += $tax;
             }
         }
-
         return [round($subtotal, 2), round($taxAmount, 2)];
     }
 
-    /**
-     * Normalise item data into the DB column shape used by both create and update.
-     *
-     * @param  array<string, mixed>  $itemData
-     * @return array<string, mixed>
-     */
-    private function itemPayload(array $itemData): array
-    {
+    private function itemPayload(array $itemData): array {
         return [
             'product_variant_id' => $itemData['product_variant_id'],
             'quantity'           => $itemData['quantity'],
@@ -458,41 +516,23 @@ class PurchaseController extends Controller
         ];
     }
 
-    /**
-     * Build the mapped product list used by Add/Edit forms.
-     *
-     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
-     */
-    private function buildProductList()
-    {
-        return ProductVariant::with([
-            'product:id,name,category_id,tax_category_id',
-            'product.category:id,name',
-            'product.taxCategory:id,name,tax_percent,type',
-            'unit:id,name,symbol',
-            'barcodes',
-        ])
-            ->where('status', true)
-            ->get()
-            ->map(fn ($variant) => [
-                'id'                => $variant->id,
-                'name'              => ($variant->product?->name ?? 'N/A') . ' - ' . ($variant->variant_name ?? 'N/A'),
-                'sku'               => $variant->sku ?? null,
-                'unit'              => $variant->unit?->symbol ?? null,
-                'mrp'               => $variant->mrp ?? 0,
+    private function buildProductList() {
+        return ProductVariant::with(['product:id,name,category_id,tax_category_id', 'product.category:id,name', 'product.taxCategory:id,name,tax_percent,type', 'unit:id,name,symbol', 'barcodes'])
+            ->where('status', true)->get()->map(fn ($variant) => [
+                'id' => $variant->id,
+                'name' => ($variant->product?->name ?? 'N/A') . ' - ' . ($variant->variant_name ?? 'N/A'),
+                'sku' => $variant->sku ?? null,
+                'unit' => $variant->unit?->symbol ?? null,
+                'mrp' => $variant->mrp ?? 0,
                 'min_selling_price' => $variant->min_selling_price ?? 0,
-                'selling_price'     => $variant->selling_price ?? 0,
-                'cost_price'        => $variant->cost_price ?? 0,
-                'tax_id'            => $variant->product?->tax_category_id ?? null,
-                'barcode'           => $variant->barcodes?->first()?->barcode ?? null,
+                'selling_price' => $variant->selling_price ?? 0,
+                'cost_price' => $variant->cost_price ?? 0,
+                'tax_id' => $variant->product?->tax_category_id ?? null,
+                'barcode' => $variant->barcodes?->first()?->barcode ?? null,
             ]);
     }
 
-    /**
-     * Update stock when a purchase is confirmed.
-     */
-    private function updateStock(PurchaseItem $purchaseItem, int $warehouseId, int $quantity): void
-    {
+    private function updateStock(PurchaseItem $purchaseItem, int $warehouseId, int $quantity): void {
         $stockBatch = StockBatch::create([
             'product_variant_id' => $purchaseItem->product_variant_id,
             'warehouse_id'       => $warehouseId,
@@ -502,7 +542,6 @@ class PurchaseController extends Controller
             'received_quantity'  => $quantity,
             'available_quantity' => $quantity,
         ]);
-
         StockLedger::create([
             'product_variant_id' => $purchaseItem->product_variant_id,
             'warehouse_id'       => $warehouseId,
@@ -513,32 +552,16 @@ class PurchaseController extends Controller
             'source_id'          => $purchaseItem->purchase_id,
             'remarks'            => "Purchase from invoice #{$purchaseItem->purchase->invoice_no}",
         ]);
-
         $snapshot = StockSnapshot::firstOrCreate(
             ['product_variant_id' => $purchaseItem->product_variant_id, 'warehouse_id' => $warehouseId],
             ['available_quantity' => 0, 'reserved_quantity' => 0],
         );
         $snapshot->increment('available_quantity', $quantity);
-
         ProductVariant::where('id', $purchaseItem->product_variant_id)->update([
             'cost_price'        => $purchaseItem->cost_price,
             'min_selling_price' => $purchaseItem->min_selling_price,
             'selling_price'     => $purchaseItem->selling_price,
             'mrp'               => $purchaseItem->mrp,
         ]);
-    }
-
-    /**
-     * Upload invoice image and return its stored path, or null on failure.
-     */
-    private function uploadImage(UploadedFile $file, string $slug): ?string
-    {
-        try {
-            $fileName = $slug . '-' . Str::random(6) . '.' . $file->getClientOriginalExtension();
-            return $file->storeAs('Invoice', $fileName, self::IMAGE_DISK);
-        } catch (\Throwable $e) {
-            Log::error('Invoice image upload failed', ['error' => $e->getMessage()]);
-            return null;
-        }
     }
 }

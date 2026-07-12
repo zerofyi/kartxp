@@ -2,7 +2,10 @@
 
 use App\Http\Controllers\AuthController;
 
-Route::middleware('check')->group(function () {
-    //Route::get('login', [AuthController::class, 'login'])->name('login');
-    });
-    Route::post('signin', [AuthController::class, 'signin'])->name('signin');
+Route::post('signin', [AuthController::class, 'signin'])->name('signin');
+
+Route::get('dashboard', function () {
+    $user = Auth::user();
+    return ('Welcome, ' . $user->name . '! You are logged in as ' . $user->role . '.');
+})->name('dashboard')->middleware('auth', 'role.redirect');
+

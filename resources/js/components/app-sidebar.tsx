@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import AppLogo from './app-logo';
-import { ScrollArea } from './ui/scroll-area';
+import { ScrollArea } from '@/components/special/scroll-area';
 import warehouse from '@/routes/warehouse';
 
 const mainNavItems: NavItem[] = [
@@ -85,8 +85,7 @@ const inventoryNavItems: NavItem[] = [
     },
     {
         title: 'Reports & Ledger',
-        href: '#',
-        //href: warehouse.inventoryAdvanced.lowStock().url,
+        href: warehouse.analyticsEngine.dashboard().url,
         icon: ClipboardList,
     },
 ];

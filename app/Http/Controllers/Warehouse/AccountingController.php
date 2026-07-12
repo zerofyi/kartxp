@@ -18,7 +18,7 @@ class AccountingController extends Controller
 {
     private function getCurrentWarehouseId(): ?int
     {
-        return Auth::user()->currentWarehouse()->value('warehouses.id');
+        return Auth::user()->ownedWarehouse()->value('warehouses.id');
     }
 
     public function chartOfAccounts(): Response
@@ -98,7 +98,7 @@ class AccountingController extends Controller
 
     public function expenses(Request $request): Response
     {
-        $warehouseId = Auth::user()->currentWarehouse()->value('warehouses.id');
+        $warehouseId = Auth::user()->ownedWarehouse()->value('warehouses.id');
 
         $expenses = Expense::where('warehouse_id', $warehouseId)
             ->with('createdBy:id,name')               // component renders created_by.name
@@ -142,7 +142,7 @@ class AccountingController extends Controller
             'attachment'      => 'nullable|file|max:5120',
         ]);
 
-        $warehouseId = Auth::user()->currentWarehouse()->value('warehouses.id');
+        $warehouseId = Auth::user()->ownedWarehouse()->value('warehouses.id');
         $attachPath  = null;
 
         if ($request->hasFile('attachment')) {

@@ -6,147 +6,203 @@ use App\Http\Controllers\Controller;
 use App\Models\Setting;
 use App\Models\ShippingZone;
 use App\Models\Warehouse;
+use App\Services\ImageStorage\ImageStorageService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class SettingsController extends Controller
 {
     /**
-     * Resolve the active warehouse ID context safely.
+     // Inject the infrastructure storage service into the controller context
      */
+    public function __construct(
+        protected ImageStorageService $imageStorage
+    ) {}
+
     private function currentWarehouseId(): int
     {
-        return Auth::user()->currentWarehouse()->value('warehouses.id')
+        return Auth::user()->ownedWarehouse()->value('warehouses.id')
             ?? abort(403, 'Warehouse session context missing or invalid.');
     }
 
-    /**
-     * Display general system preference arrays.
-     */
     public function index(): Response
     {
         $warehouseId = $this->currentWarehouseId();
+        $warehouse = Warehouse::findOrFail($warehouseId);
 
-        $rawSettings = Setting::where('warehouse_id', $warehouseId)
-            ->orWhereNull('warehouse_id')
-            ->get();
+        // Fetch warehouse-specific configurations directly mapped key->value
+        $settings = Setting::where('warehouse_id', $warehouseId)
+            ->pluck('value', 'key')
+            ->toArray();
 
-        // Flatten database rows into a direct key => value array for simpler UI form binding
-        $settings = [];
-        foreach ($rawSettings as $setting) {
-            $settings[$setting->key] = $setting->value;
-        }
-
-        // Ensure defaults exist for forms if database keys aren't provisioned yet
+        // Provision complete fallback configurations dictionary parameters
         $defaults = [
             'receipt_footer'      => '',
-            'default_tax_rate'    => '0',
-            'low_stock_threshold' => '10',
-            'auto_confirm_orders' => '0'
+            'default_tax_rate'    => 'GST 5% (Inclusive)',
+            'low_stock_threshold' => '5',
+            'auto_confirm_orders' => '0',
+            'gst_enabled'         => '0',
+            'invoice_layout'      => 'thermal_classic',
+            'upi_id'              => '',
+            'is_qz_enabled'        => '0',
+            'thermal_printer_name' => '',
+            'a4_printer_name'      => '',
         ];
-        $settings = array_merge($defaults, $settings);
 
         return Inertia::render('Warehouse/Settings/Index', [
-            'settings'  => $settings,
-            'warehouse' => Warehouse::findOrFail($warehouseId),
+            'settings'   => array_merge($defaults, $settings),
+            'warehouse'  => $warehouse,
         ]);
     }
 
-    /**
-     * Batch update general system preferences.
-     */
     public function update(Request $request): RedirectResponse
     {
         $warehouseId = $this->currentWarehouseId();
-        $incoming = $request->all();
 
-        foreach ($incoming as $key => $value) {
-            // Guard against saving Inertia processing metadata fields
-            if (in_array($key, ['errors', 'processing'])) continue;
+        // Strict request validation guarding against structural database pollution
+        $validated = $request->validate([
+            'receipt_footer'      => 'nullable|string|max:1000',
+            'default_tax_rate'    => 'required|string|max:50',
+            'low_stock_threshold' => 'required|integer|min:0|max:99999',
+            'auto_confirm_orders' => 'required|in:0,1',
+            'gst_enabled'         => 'required|in:0,1',
+            'invoice_layout'      => 'required|in:thermal_classic,thermal_modern,a4_standard,a4_modern',
+            'upi_id'              => 'nullable|string|max:100',
+            'is_qz_enabled'        => 'required|in:0,1',
+            'thermal_printer_name' => 'nullable|string|max:255',
+            'a4_printer_name'      => 'nullable|string|max:255',
+        ]);
 
-            Setting::updateOrCreate(
-                ['key' => $key, 'warehouse_id' => $warehouseId],
-                ['value' => is_bool($value) ? ($value ? '1' : '0') : strval($value ?? '')]
-            );
-        }
+        // Wrap execution contexts in an atomic transaction statement to optimize performance
+        DB::transaction(function () use ($validated, $warehouseId) {
+            foreach ($validated as $key => $value) {
+                Setting::updateOrCreate(
+                    ['key' => $key, 'warehouse_id' => $warehouseId],
+                    ['value' => is_bool($value) ? ($value ? '1' : '0') : strval($value ?? '')]
+                );
+            }
+        });
 
         Cache::forget("settings:warehouse:{$warehouseId}");
 
         return back()->with('success', 'General configurations committed successfully.');
     }
 
-    /**
-     * Display corporate business profile properties.
-     */
     public function businessProfile(): Response
     {
         $warehouseId = $this->currentWarehouseId();
         $warehouse   = Warehouse::findOrFail($warehouseId);
 
-        return Inertia::render('Warehouse/Settings/BusinessProfile', compact('warehouse'));
+        return Inertia::render('Warehouse/Settings/BusinessProfile', [
+            'warehouse' => [
+                'id'         => $warehouse->id,
+                'name'       => $warehouse->name,
+                'platform'   => $warehouse->platform ?? 'ghorerbazar',
+                'address'    => $warehouse->address,
+                'location'   => $warehouse->location,
+                'phone'      => $warehouse->phone,
+                'email'      => $warehouse->email,
+                'logo_path'  => $warehouse->logo_path,
+                'gstin'      => $warehouse->gstin,
+                'lat'        => $warehouse->lat !== null ? (float) $warehouse->lat : null,
+                'lng'        => $warehouse->lng !== null ? (float) $warehouse->lng : null,
+                'timezone'   => $warehouse->timezone ?? 'Asia/Kolkata',
+                'currency'   => $warehouse->currency ?? 'INR',
+            ]
+        ]);
     }
 
-    /**
-     * Update corporate profile attributes with secure image uploads.
-     */
-    public function updateBusinessProfile(Request $request): RedirectResponse
+    public function updateBusinessProfile(Request $request, Warehouse $warehouse): RedirectResponse
     {
-        $warehouseId = $this->currentWarehouseId();
-        $warehouse   = Warehouse::findOrFail($warehouseId);
+        if ($warehouse->id !== $this->currentWarehouseId()) {
+            abort(403, 'Cross-tenant profile mutation target unauthorized.');
+        }
 
+        // Platform is removed entirely from request input validation fields to ensure immutability
         $validated = $request->validate([
-            'name'    => 'required|string|max:255',
-            'address' => 'required|string',
-            'phone'   => 'nullable|string|max:20',
-            'email'   => 'nullable|email|max:255',
-            'gstin'   => 'nullable|string|max:20',
-            'logo'    => 'nullable|image|max:2048',
-            'lat'     => 'nullable|numeric',
-            'lng'     => 'nullable|numeric',
+            'name'      => 'required|string|max:255',
+            'address'   => 'required|string',
+            'location'  => 'nullable|string|max:1000', // Captures shareable map URL strings smoothly
+            'phone'     => 'nullable|string|max:20',
+            'email'     => 'nullable|email|max:255',
+            'gstin'     => 'nullable|string|max:20',
+            'logo'      => 'nullable|image|max:2048',
+            'lat'       => 'nullable|numeric|between:-90,90',
+            'lng'       => 'nullable|numeric|between:-180,180',
+            'timezone'  => 'required|string|max:100',
+            'currency'  => 'required|string|max:10',
         ]);
 
+        // Atomic swap engine utilizing specialized ImageStorageService framework
         if ($request->hasFile('logo')) {
-            if ($warehouse->logo_path) {
-                Storage::disk('public')->delete($warehouse->logo_path);
-            }
-            $validated['logo_path'] = $request->file('logo')->store("warehouses/{$warehouseId}/logo", 'public');
+            $storageResult = $this->imageStorage->replace(
+                file: $request->file('logo'),
+                slug: $warehouse->name,
+                folder: "Warehouses",
+                existingPath: $warehouse->logo_path
+            );
+
+            // Persist the clean relative storage path to the database
+            $validated['logo_path'] = $storageResult->path;
         }
 
         unset($validated['logo']);
         $warehouse->update($validated);
 
-        return back()->with('success', 'Business profile attributes updated.');
+        // Flush cached profile entries to update components across system instances instantly
+        Cache::forget("warehouse:profile:{$warehouse->id}");
+
+        return back()->with('success', 'Operational warehouse hub configurations committed successfully.');
     }
 
-    /**
-     * Display logistic dispatch zone regions.
-     */
     public function shippingZones(): Response
     {
         $warehouseId = $this->currentWarehouseId();
         $zones       = ShippingZone::where('warehouse_id', $warehouseId)->orderBy('name')->get();
+        $warehouse   = Warehouse::select('id', 'lat', 'lng')->findOrFail($warehouseId);
 
-        return Inertia::render('Warehouse/Settings/ShippingZones', compact('zones'));
+        return Inertia::render('Warehouse/Settings/ShippingZones', [
+            'zones'     => $zones,
+            'warehouse' => [
+                'id'  => $warehouse->id,
+                'lat' => $warehouse->lat !== null ? (float) $warehouse->lat : null,
+                'lng' => $warehouse->lng !== null ? (float) $warehouse->lng : null,
+            ],
+        ]);
     }
 
-    /**
-     * Create a logistics dispatch zone region.
-     */
     public function storeShippingZone(Request $request): RedirectResponse
     {
         $validated = $request->validate([
             'name'       => 'required|string|max:100',
             'pincodes'   => 'nullable|array',
-            'pincodes.*' => 'string',
+            'pincodes.*' => 'string|max:20',
+            'radius_km'  => 'nullable|numeric|min:0|max:500',
             'charge'     => 'required|numeric|min:0',
             'free_above' => 'nullable|numeric|min:0',
             'is_active'  => 'required|boolean',
         ]);
+
+        $isRadiusStrategy = !empty($validated['radius_km']);
+
+        // Check for conflicting selection bounds
+        if ($isRadiusStrategy && !empty($validated['pincodes'])) {
+            return back()
+                ->withErrors(['name' => 'A zone can be targeted by postcodes or by radius, not both.'])
+                ->withInput();
+        }
+
+        // Clean values by selected strategy profile to avoid field drift from background tabs
+        if ($isRadiusStrategy) {
+            $validated['pincodes'] = null;
+        } else {
+            $validated['radius_km'] = null;
+        }
 
         $warehouseId = $this->currentWarehouseId();
 
@@ -155,33 +211,41 @@ class SettingsController extends Controller
         return back()->with('success', 'Logistics dispatch zone region appended.');
     }
 
-    /**
-     * Modify active logistics zone parameters.
-     */
     public function updateShippingZone(Request $request, ShippingZone $zone): RedirectResponse
     {
-        $warehouseId = $this->currentWarehouseId();
-        if ($zone->warehouse_id !== $warehouseId) {
+        if ($zone->warehouse_id !== $this->currentWarehouseId()) {
             abort(403, 'Cross-tenant mutation target unauthorized.');
         }
 
         $validated = $request->validate([
             'name'       => 'required|string|max:100',
             'pincodes'   => 'nullable|array',
-            'pincodes.*' => 'string',
+            'pincodes.*' => 'string|max:20',
+            'radius_km'  => 'nullable|numeric|min:0|max:500',
             'charge'     => 'required|numeric|min:0',
             'free_above' => 'nullable|numeric|min:0',
             'is_active'  => 'required|boolean',
         ]);
+
+        $isRadiusStrategy = !empty($validated['radius_km']);
+
+        if ($isRadiusStrategy && !empty($validated['pincodes'])) {
+            return back()
+                ->withErrors(['name' => 'A zone can be targeted by postcodes or by radius, not both.'])
+                ->withInput();
+        }
+
+        if ($isRadiusStrategy) {
+            $validated['pincodes'] = null;
+        } else {
+            $validated['radius_km'] = null;
+        }
 
         $zone->update($validated);
 
         return back()->with('success', 'Logistics zone properties updated.');
     }
 
-    /**
-     * Remove an inactive shipping zone.
-     */
     public function deleteShippingZone(ShippingZone $zone): RedirectResponse
     {
         if ($zone->warehouse_id !== $this->currentWarehouseId()) {

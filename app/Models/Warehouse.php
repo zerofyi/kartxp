@@ -10,7 +10,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Warehouse extends Model
 {
-    protected $fillable = ['name', 'address', 'location', 'phone', 'email', 'logo_path', 'is_active', 'gstin', 'lat', 'lng', 'timezone', 'currency', 'user_id'];
+    protected $fillable = [
+        'name', 'address', 'location', 'phone', 'email', 'logo_path',
+        'is_active', 'gstin', 'lat', 'lng', 'timezone', 'currency', 'user_id'
+    ];
 
     protected $casts = [
         'is_active' => 'boolean',
@@ -23,26 +26,17 @@ class Warehouse extends Model
     // -----------------------------------------------------------------------
 
     /**
-     * Warehouse owner.
-     * Uses warehouses.user_id
+     * Direct link to the exclusive warehouse owner.
      */
-    public function ownerUser(): BelongsTo
+    public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
     }
 
     /**
-     * Membership records.
+     * All non-owner workers assigned to this warehouse context.
      */
-    public function warehouseUsers(): HasMany
-    {
-        return $this->hasMany(WarehouseUser::class);
-    }
-
-    /**
-     * All users assigned to this warehouse.
-     */
-    public function users(): BelongsToMany
+    public function employees(): BelongsToMany
     {
         return $this->belongsToMany(
             User::class,
@@ -54,29 +48,22 @@ class Warehouse extends Model
         ->withTimestamps();
     }
 
-    /**
-     * Owner membership.
-     */
-    public function owner(): BelongsToMany
-    {
-        return $this->users()->wherePivot('role', 'owner');
-    }
-
     public function managers(): BelongsToMany
     {
-        return $this->users()->wherePivot('role', 'manager');
+        return $this->employees()->wherePivot('role', 'manager');
     }
 
     public function staff(): BelongsToMany
     {
-        return $this->users()->wherePivot('role', 'staff');
+        return $this->employees()->wherePivot('role', 'staff');
     }
 
     public function agents(): BelongsToMany
     {
-        return $this->users()->wherePivot('role', 'delivery_agent');
+        return $this->employees()->wherePivot('role', 'delivery_agent');
     }
 
+    // --- Core E-Commerce Operations ---
 
     public function stockBatches(): HasMany
     {
@@ -113,9 +100,24 @@ class Warehouse extends Model
         return $this->hasMany(ShippingZone::class);
     }
 
+    public function settings(): HasMany
+    {
+        return $this->hasMany(Setting::class, 'warehouse_id');
+    }
+
+    public function warehouseUsers(): HasMany
+    {
+        return $this->hasMany(WarehouseUser::class, 'warehouse_id');
+    }
+
     // -----------------------------------------------------------------------
-    // Scopes
+    // Helper Methods & Scopes
     // -----------------------------------------------------------------------
+
+    public function allSettings(): array
+    {
+        return Setting::allForWarehouse($this->id);
+    }
 
     public function scopeActive(Builder $query): Builder
     {

@@ -3,11 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
-use App\Services\ImageUploadService;
+use App\Services\ImageStorage\ImageStorageService;
+use App\Services\ImageStorage\ImageStorageException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
@@ -17,7 +17,8 @@ class CategoryController extends Controller
     private const ICON_FOLDER  = 'Category/icons';
     private const PER_PAGE     = 10;
 
-    public function __construct(protected ImageUploadService $imageUploadService) {}
+    // Type hints are updated to the new ImageStorageService
+    public function __construct(protected ImageStorageService $imageStorageService) {}
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -25,16 +26,11 @@ class CategoryController extends Controller
 
     private function currentWarehouse()
     {
-        $warehouse = Auth::user()->currentWarehouse();
+        $warehouse = Auth::user()->ownedWarehouse;
 
         abort_if(! $warehouse, 403, 'No active warehouse selected.');
 
         return $warehouse;
-    }
-
-    private function resolveUrl(?string $path): ?string
-    {
-        return $path ? Storage::disk('public_html')->url($path) : null;
     }
 
     private function formatCategory(Category $category): array
@@ -47,8 +43,9 @@ class CategoryController extends Controller
             'sort_order'  => $category->sort_order,
             'parent_id'   => $category->parent_id,
             'parent_name' => $category->parent?->name,
-            'image_url'   => $this->resolveUrl($category->image_path),
-            'icon_url'    => $this->resolveUrl($category->icon_path),
+            // Resolves paths cleanly to full public URLs using the default disk
+            'image_url'   => $this->imageStorageService->url($category->image_path),
+            'icon_url'    => $this->imageStorageService->url($category->icon_path),
         ];
     }
 
@@ -70,7 +67,6 @@ class CategoryController extends Controller
             ->withQueryString()
             ->through(fn ($category) => $this->formatCategory($category));
 
-        // Flat list of active parent candidates for the dropdown
         $parents = Category::query()
             ->select('id', 'name', 'slug')
             ->where('warehouse_id', $warehouse->id)
@@ -100,40 +96,38 @@ class CategoryController extends Controller
             'parent_id'  => ['nullable', 'integer', 'exists:categories,id'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'status'     => ['nullable', 'boolean'],
-            'image'      => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
-            'icon'       => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp,svg', 'max:1024'],
+            // Standard validation: note that 'image' rules can break SVGs, so we validate types carefully
+            'image'      => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'icon'       => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,svg,xml', 'max:1024'],
         ]);
 
         DB::beginTransaction();
 
-        $imagePath = null;
-        $iconPath  = null;
-
         try {
             $slug = $this->uniqueSlug($validated['name'], $warehouse->id);
 
+            $imagePath = null;
             if ($request->hasFile('image')) {
-                $imagePath = $this->imageUploadService->upload(
-                    file:   $request->file('image'),
-                    slug:   $slug,
+                // Upload standard images: restricts to specific types via runtime array
+                $imageResult = $this->imageStorageService->upload(
+                    file: $request->file('image'),
+                    slug: $slug,
                     folder: self::IMAGE_FOLDER,
+                    allowedTypes: ['image/jpeg', 'image/png', 'image/webp']
                 );
-
-                if (! $imagePath) {
-                    throw new \RuntimeException('Category image upload failed.');
-                }
+                $imagePath = $imageResult->path;
             }
 
+            $iconPath = null;
             if ($request->hasFile('icon')) {
-                $iconPath = $this->imageUploadService->upload(
-                    file:   $request->file('icon'),
-                    slug:   "{$slug}_icon",
+                // Upload icons: allow SVGs or small standard image graphics
+                $iconResult = $this->imageStorageService->upload(
+                    file: $request->file('icon'),
+                    slug: "{$slug}_icon",
                     folder: self::ICON_FOLDER,
+                    allowedTypes: ['image/svg+xml', 'image/png', 'image/jpeg']
                 );
-
-                if (! $iconPath) {
-                    throw new \RuntimeException('Category icon upload failed.');
-                }
+                $iconPath = $iconResult->path;
             }
 
             Category::create([
@@ -148,17 +142,15 @@ class CategoryController extends Controller
             ]);
 
             DB::commit();
-
             return redirect()->back()->with('success', 'Category created successfully.');
 
+        } catch (ImageStorageException $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors(['error' => $e->getMessage()]);
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->cleanupFiles($imagePath, $iconPath);
             logger()->error('Category store failed', ['error' => $e->getMessage()]);
-
-            return redirect()->back()->withErrors([
-                'error' => 'Something went wrong while creating the category.',
-            ]);
+            return redirect()->back()->withErrors(['error' => 'Something went wrong while creating the category.']);
         }
     }
 
@@ -169,7 +161,6 @@ class CategoryController extends Controller
     public function update(Request $request, Category $category)
     {
         $warehouse = $this->currentWarehouse();
-
         abort_if($category->warehouse_id !== $warehouse->id, 403);
 
         $validated = $request->validate([
@@ -177,51 +168,40 @@ class CategoryController extends Controller
             'parent_id'  => ['nullable', 'integer', 'exists:categories,id'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'status'     => ['nullable', 'boolean'],
-            'image'      => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
-            'icon'       => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp,svg', 'max:1024'],
+            'image'      => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'icon'       => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,svg,xml', 'max:1024'],
         ]);
 
-        // Prevent a category from being its own parent
         if (! empty($validated['parent_id']) && $validated['parent_id'] === $category->id) {
             return redirect()->back()->withErrors(['parent_id' => 'A category cannot be its own parent.']);
         }
 
         DB::beginTransaction();
 
-        $newImagePath = null;
-        $newIconPath  = null;
-
         try {
             $slug = $this->uniqueSlug($validated['name'], $warehouse->id, $category->id);
 
             if ($request->hasFile('image')) {
-                $newImagePath = $this->imageUploadService->upload(
-                    file:   $request->file('image'),
-                    slug:   $slug,
+                // replace() atomically handles saving the new file and removing the old one on success
+                $imageResult = $this->imageStorageService->replace(
+                    file: $request->file('image'),
+                    slug: $slug,
                     folder: self::IMAGE_FOLDER,
+                    existingPath: $category->image_path,
+                    allowedTypes: ['image/jpeg', 'image/png', 'image/webp']
                 );
-
-                if (! $newImagePath) {
-                    throw new \RuntimeException('Category image upload failed.');
-                }
-
-                $this->deleteFileIfExists($category->image_path);
-                $category->image_path = $newImagePath;
+                $category->image_path = $imageResult->path;
             }
 
             if ($request->hasFile('icon')) {
-                $newIconPath = $this->imageUploadService->upload(
-                    file:   $request->file('icon'),
-                    slug:   "{$slug}_icon",
+                $iconResult = $this->imageStorageService->replace(
+                    file: $request->file('icon'),
+                    slug: "{$slug}_icon",
                     folder: self::ICON_FOLDER,
+                    existingPath: $category->icon_path,
+                    allowedTypes: ['image/svg+xml', 'image/png', 'image/jpeg']
                 );
-
-                if (! $newIconPath) {
-                    throw new \RuntimeException('Category icon upload failed.');
-                }
-
-                $this->deleteFileIfExists($category->icon_path);
-                $category->icon_path = $newIconPath;
+                $category->icon_path = $iconResult->path;
             }
 
             $category->name       = $validated['name'];
@@ -232,17 +212,15 @@ class CategoryController extends Controller
             $category->save();
 
             DB::commit();
-
             return redirect()->back()->with('success', 'Category updated successfully.');
 
+        } catch (ImageStorageException $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors(['error' => $e->getMessage()]);
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->cleanupFiles($newImagePath, $newIconPath);
             logger()->error('Category update failed', ['category_id' => $category->id, 'error' => $e->getMessage()]);
-
-            return redirect()->back()->withErrors([
-                'error' => 'Something went wrong while updating the category.',
-            ]);
+            return redirect()->back()->withErrors(['error' => 'Something went wrong while updating the category.']);
         }
     }
 
@@ -250,10 +228,6 @@ class CategoryController extends Controller
     // Private utilities
     // -----------------------------------------------------------------------
 
-    /**
-     * Generate a unique slug within the warehouse scope.
-     * Appends -2, -3, … if the base slug is already taken (excluding $exceptId).
-     */
     private function uniqueSlug(string $name, int $warehouseId, ?int $exceptId = null): string
     {
         $base    = Str::slug($name);
@@ -271,19 +245,5 @@ class CategoryController extends Controller
         }
 
         return $slug;
-    }
-
-    private function deleteFileIfExists(?string $path): void
-    {
-        if ($path && Storage::disk('public_html')->exists($path)) {
-            Storage::disk('public_html')->delete($path);
-        }
-    }
-
-    private function cleanupFiles(?string ...$paths): void
-    {
-        foreach ($paths as $path) {
-            $this->deleteFileIfExists($path);
-        }
     }
 }

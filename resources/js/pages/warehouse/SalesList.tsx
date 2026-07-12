@@ -1,8 +1,8 @@
 import { Head, router } from '@inertiajs/react';
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-    Search, Eye, Printer, Calendar, User,
-    DollarSign, Package, Filter, Download, TrendingUp,
+    Search, Eye, Printer, Calendar, X, Package, Filter, Download, ChevronLeft, ChevronRight, Layers,
+    IndianRupee
 } from 'lucide-react';
 
 import AppLayout from '@/layouts/app-layout';
@@ -16,28 +16,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: dashboard().url },
     { title: 'Sales', href: '' },
 ];
 
 type Customer = { id: number; name: string; phone: string };
-
-type OrderItem = {
-    id: number;
-    product_variant: {
-        product: { name: string };
-        unit: { symbol: string };
-    };
-    quantity: number;
-    price: number;
-    discount: number;
-};
-
-type Payment = { id: number; method: string; amount: number };
 
 type Sale = {
     id: number;
@@ -49,10 +33,38 @@ type Sale = {
     tax_amount: number;
     discount_amount: number;
     total_amount: number;
-    items?: OrderItem[];
-    payments?: Payment[];
+    items_count: number;
     created_at: string;
-    created_by?: { name: string };
+};
+
+type PaginationLink = {
+    url: string | null | undefined;
+    label: string;
+    active: boolean;
+};
+
+type FilterBag = {
+    search: string;
+    status: string;
+    channel: string;
+    start_date: string;
+    end_date: string;
+    per_page: number;
+    [key: string]: string | number | null | undefined;
+};
+
+type MonthStats = {
+    sales: number;
+    count: number;
+    discounts: number;
+    customers: number;
+};
+
+type SummaryStats = {
+    grand_total: number;
+    grand_count: number;
+    this_month: MonthStats;
+    last_month: MonthStats;
 };
 
 type Props = {
@@ -62,12 +74,12 @@ type Props = {
         last_page: number;
         per_page: number;
         total: number;
+        links: PaginationLink[];
     };
+    stats: SummaryStats;
+    filters: FilterBag;
 };
 
-// ─────────────────────────────────────────────
-// Helpers (outside component – stable refs)
-// ─────────────────────────────────────────────
 const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
     completed:  'default',
     pending:    'secondary',
@@ -77,171 +89,186 @@ const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 
 
 function StatusBadge({ status }: { status: string }) {
     return (
-        <Badge variant={STATUS_VARIANTS[status] ?? 'outline'}>
+        <Badge variant={STATUS_VARIANTS[status] ?? 'outline'} className="tracking-wide font-medium">
             {status.toUpperCase()}
         </Badge>
     );
 }
 
-function fmtCurrency(val: number | string) {
-    return `₹${Number(val).toFixed(2)}`;
-}
+const INR = (amount: number) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(amount);
 
 function fmtDate(iso: string) {
-    return new Date(iso).toLocaleDateString('en-IN');
+    return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// ─────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────
-export default function SalesList({ sales }: Props) {
-    const [searchQuery,  setSearchQuery]  = useState('');
-    const [statusFilter, setStatusFilter] = useState('all');
-    const [dateFilter,   setDateFilter]   = useState({ from: '', to: '' });
-    const [showFilters,  setShowFilters]  = useState(false);
+export default function SalesList({ sales, stats, filters }: Props) {
+    const [search, setSearch] = useState(filters.search ?? '');
+    const [status, setStatus] = useState(filters.status ?? 'all');
+    const [channel, setChannel] = useState(filters.channel ?? 'all');
+    const [startDate, setStartDate] = useState(filters.start_date ?? '');
+    const [endDate, setEndDate] = useState(filters.end_date ?? '');
+    const [showFilters, setShowFilters] = useState(false);
 
-    // ── Client-side filter (only on the current page's data) ──────────
-    // For large datasets the right approach is server-side; this is intentionally
-    // scoped to the paginated page data so it stays fast.
-    const filteredSales = useMemo(() => {
-        const q       = searchQuery.toLowerCase().trim();
-        const fromMs  = dateFilter.from ? new Date(dateFilter.from).getTime() : 0;
-        const toMs    = dateFilter.to   ? new Date(dateFilter.to + 'T23:59:59').getTime() : Infinity;
-
-        return sales.data.filter(sale => {
-            if (q && !(
-                sale.order_number.toLowerCase().includes(q) ||
-                sale.customer?.name.toLowerCase().includes(q) ||
-                sale.customer?.phone.includes(q)
-            )) return false;
-
-            if (statusFilter !== 'all' && sale.status !== statusFilter) return false;
-
-            const saleMs = new Date(sale.created_at).getTime();
-            if (saleMs < fromMs || saleMs > toMs) return false;
-
-            return true;
-        });
-    }, [sales.data, searchQuery, statusFilter, dateFilter]);
-
-    // ── Aggregates (memoized) ─────────────────────────────────────────
-    const stats = useMemo(() => {
-        let totalSales = 0;
-        const customerIds = new Set<number>();
-
-        for (const s of filteredSales) {
-            totalSales += Number(s.total_amount);
-            if (s.customer?.id) customerIds.add(s.customer.id);
-        }
-
-        const count = filteredSales.length;
-        return {
-            count,
-            totalSales,
-            uniqueCustomers: customerIds.size,
-            avgOrder: count > 0 ? totalSales / count : 0,
+    const applyFilters = (updatedFields = {}) => {
+        const payload: Record<string, string | number | null | undefined> = {
+            search,
+            status,
+            channel,
+            start_date: startDate,
+            end_date: endDate,
+            per_page: filters.per_page ?? 25,
+            ...updatedFields
         };
-    }, [filteredSales]);
 
-    // ── CSV export (fixed: was mapping `rows` twice, not `row`) ───────
+        (Object.keys(payload) as Array<keyof typeof payload>).forEach(key => {
+            if (payload[key] === 'all' || payload[key] === '') {
+                payload[key] = null;
+            }
+        });
+
+        router.get('/warehouse/sales', payload, {
+            preserveState: true,
+            replace: true,
+        });
+    };
+
+    const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') applyFilters();
+    };
+
+    const clearFilters = () => {
+        setSearch(''); setStatus('all'); setChannel('all'); setStartDate(''); setEndDate('');
+        router.get('/warehouse/sales', {}, { replace: true });
+    };
+
     const exportToCSV = useCallback(() => {
-        const headers = ['Order Number','Date','Customer','Phone','Items','Subtotal','Tax','Discount','Total','Status'];
-        const rows = filteredSales.map(s => [
+        const headers = ['Order Number','Date','Customer','Phone','Subtotal','Tax','Discount','Total','Status'];
+        const rows = sales.data.map(s => [
             s.order_number,
             fmtDate(s.created_at),
-            s.customer?.name ?? 'Walk-in',
+            s.customer?.name ?? 'Walk-in Customer',
             s.customer?.phone ?? '-',
-            String(s.items?.length ?? 0),
-            Number(s.subtotal).toFixed(2),
-            Number(s.tax_amount).toFixed(2),
-            Number(s.discount_amount).toFixed(2),
-            Number(s.total_amount).toFixed(2),
+            s.subtotal.toFixed(2),
+            s.tax_amount.toFixed(2),
+            s.discount_amount.toFixed(2),
+            s.total_amount.toFixed(2),
             s.status,
         ]);
 
         const csvContent = [
             headers.join(','),
-            ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),   // ← fixed: was `rows.map`
+            ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
         ].join('\n');
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url  = URL.createObjectURL(blob);
-        const a    = Object.assign(document.createElement('a'), { href: url, download: `sales-${new Date().toISOString().split('T')[0]}.csv` });
+        const a    = Object.assign(document.createElement('a'), { href: url, download: `sales-export-${new Date().toISOString().split('T')[0]}.csv` });
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-    }, [filteredSales]);
+    }, [sales.data]);
 
-    const navigatePage = useCallback((page: number) => {
-        router.visit(`/warehouse/sales?page=${page}`, { preserveScroll: true });
-    }, []);
+    const hasActiveFilters = search || status !== 'all' || channel !== 'all' || startDate || endDate;
 
-    const clearFilters = useCallback(() => {
-        setSearchQuery('');
-        setStatusFilter('all');
-        setDateFilter({ from: '', to: '' });
-    }, []);
-
-    const hasActiveFilters = searchQuery || statusFilter !== 'all' || dateFilter.from || dateFilter.to;
-
-    // ─────────────────────────────────────────
-    // Render
-    // ─────────────────────────────────────────
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Sales List" />
+            <Head title="Sales Orders" />
 
-            <div className="flex h-full flex-1 flex-col gap-4 p-4">
+            <div className="flex h-full flex-1 flex-col gap-4 p-6">
 
-                {/* ── Header ────────────────────────────────────── */}
-                <Card>
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle className="text-2xl">Sales Management</CardTitle>
-                                <CardDescription>View and manage all sales orders</CardDescription>
-                            </div>
-                            <div className="flex gap-2">
-                                <Button onClick={exportToCSV} variant="outline">
-                                    <Download className="mr-2 size-4" /> Export CSV
-                                </Button>
-                                <Button onClick={() => router.visit('/warehouse/pos')}>
-                                    <Package className="mr-2 size-4" /> New Sale
-                                </Button>
-                            </div>
-                        </div>
-                    </CardHeader>
-                </Card>
-
-                {/* ── Stats ─────────────────────────────────────── */}
-                <div className="grid gap-4 md:grid-cols-4">
-                    <StatCard icon={<Package className="size-6 text-blue-600 dark:text-blue-400" />} bg="bg-blue-100 dark:bg-blue-900" label="Total Orders"     value={stats.count} />
-                    <StatCard icon={<DollarSign className="size-6 text-green-600 dark:text-green-400" />} bg="bg-green-100 dark:bg-green-900" label="Total Sales" value={fmtCurrency(stats.totalSales)} />
-                    <StatCard icon={<User className="size-6 text-purple-600 dark:text-purple-400" />} bg="bg-purple-100 dark:bg-purple-900" label="Customers" value={stats.uniqueCustomers} />
-                    <StatCard icon={<TrendingUp className="size-6 text-orange-600 dark:text-orange-400" />} bg="bg-orange-100 dark:bg-orange-900" label="Avg Order Value" value={fmtCurrency(stats.avgOrder)} />
+                {/* ── Title Header ── */}
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-foreground">Sales Register</h1>
+                        <p className="text-muted-foreground text-sm font-medium">Monthly timeline metrics comparison, active bill structures, and store logs.</p>
+                    </div>
+                    <div className="flex gap-2">
+                        <Button onClick={exportToCSV} variant="outline" className="h-10 text-sm font-medium">
+                            <Download className="mr-2 size-4" /> Export CSV
+                        </Button>
+                        <Button onClick={() => router.visit('/warehouse/pos')} className="h-10 text-sm font-medium shadow-sm">
+                            <Package className="mr-2 size-4" /> Open POS Terminal
+                        </Button>
+                    </div>
                 </div>
 
-                {/* ── Filters ───────────────────────────────────── */}
-                <Card>
-                    <CardContent className="p-4">
-                        <div className="flex flex-wrap gap-3">
-                            <div className="relative min-w-60 flex-1">
+                {/* ── Theme-Safe Analytical Comparative KPI Cards ── */}
+                <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-3">
+                    {/* Card 1: Gross Sales Lifetime Summary */}
+                    <Card className="shadow-sm border-l-4 border-l-primary bg-card text-card-foreground">
+                        <CardContent className="p-5 flex items-center justify-between">
+                            <div className="space-y-1">
+                                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">Gross Revenue (Lifetime)</span>
+                                <div className="text-2xl font-bold text-primary font-mono tracking-tight">{INR(stats.grand_total)}</div>
+                                <span className="text-[11px] text-muted-foreground block font-medium">
+                                    Total Invoices Cumulative: <strong className="text-foreground font-mono">{stats.grand_count} bills</strong>
+                                </span>
+                            </div>
+                            <div className="rounded-full p-3 bg-primary/10 text-primary"><IndianRupee className="size-6" /></div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Card 2: This Current Calendar Month Performance */}
+                    <Card className="shadow-sm border-l-4 border-l-emerald-500 bg-card text-card-foreground">
+                        <CardContent className="p-5 flex items-center justify-between">
+                            <div className="space-y-1 w-full">
+                                <div className="flex justify-between items-center pr-2">
+                                    <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">This Month</span>
+                                    <span className="text-xs font-bold font-mono">{INR(stats.this_month.sales)}</span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1 pt-2 text-[11px] text-muted-foreground border-t border-muted mt-2">
+                                    <div>Invoices<strong className="text-foreground font-mono block text-xs mt-0.5">{stats.this_month.count}</strong></div>
+                                    <div>Customers<strong className="text-foreground font-mono block text-xs mt-0.5">{stats.this_month.customers}</strong></div>
+                                    <div>Discounts<strong className="text-destructive font-mono block text-xs mt-0.5">{INR(stats.this_month.discounts)}</strong></div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Card 3: Last Calendar Month Performance */}
+                    <Card className="shadow-sm border-l-4 border-l-blue-500 bg-card text-card-foreground">
+                        <CardContent className="p-5 flex items-center justify-between">
+                            <div className="space-y-1 w-full">
+                                <div className="flex justify-between items-center pr-2">
+                                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider block">Last Month</span>
+                                    <span className="text-xs font-bold font-mono text-muted-foreground">{INR(stats.last_month.sales)}</span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1 pt-2 text-[11px] text-muted-foreground border-t border-muted mt-2">
+                                    <div>Invoices<strong className="text-foreground font-mono block text-xs mt-0.5">{stats.last_month.count}</strong></div>
+                                    <div>Customers<strong className="text-foreground font-mono block text-xs mt-0.5">{stats.last_month.customers}</strong></div>
+                                    <div>Discounts<strong className="text-muted-foreground font-mono block text-xs mt-0.5">{INR(stats.last_month.discounts)}</strong></div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* ── Search and Advanced Filtering Console Panel ── */}
+                <Card className="shadow-sm bg-card text-card-foreground">
+                    <CardContent className="p-4 flex flex-col gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <div className="relative min-w-[280px] flex-1">
                                 <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                                 <Input
-                                    placeholder="Search by order number, customer…"
-                                    value={searchQuery}
-                                    onChange={e => setSearchQuery(e.target.value)}
-                                    className="pl-9"
+                                    placeholder="Search order #, customer credentials + hit Enter..."
+                                    value={search}
+                                    onChange={e => setSearch(e.target.value)}
+                                    onKeyDown={handleSearchKeyDown}
+                                    className="pl-9 h-10"
                                 />
+                                {search && (
+                                    <button onClick={() => { setSearch(''); router.get('/warehouse/sales', { ...filters, search: null }); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                        <X className="size-4" />
+                                    </button>
+                                )}
                             </div>
 
-                            <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                <SelectTrigger className="w-44">
-                                    <SelectValue placeholder="Status" />
-                                </SelectTrigger>
+                            <Select value={status} onValueChange={(v) => { setStatus(v); applyFilters({ status: v }); }}>
+                                <SelectTrigger className="w-44 h-10"><SelectValue placeholder="Status Filter" /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">All Status</SelectItem>
+                                    <SelectItem value="all">All Lifecycles</SelectItem>
                                     <SelectItem value="completed">Completed</SelectItem>
                                     <SelectItem value="pending">Pending</SelectItem>
                                     <SelectItem value="processing">Processing</SelectItem>
@@ -249,64 +276,96 @@ export default function SalesList({ sales }: Props) {
                                 </SelectContent>
                             </Select>
 
-                            <Button
-                                variant="outline"
-                                onClick={() => setShowFilters(v => !v)}
-                                className={showFilters ? 'bg-primary text-primary-foreground' : ''}
-                            >
-                                <Filter className="mr-2 size-4" /> More Filters
+                            <Button variant="outline" onClick={() => setShowFilters(v => !v)} className={`h-10 ${showFilters && "bg-muted"}`}>
+                                <Filter className="mr-2 size-4" /> Advanced Filters
                             </Button>
 
                             {hasActiveFilters && (
-                                <Button variant="ghost" onClick={clearFilters} className="text-muted-foreground">
-                                    Clear all
+                                <Button variant="ghost" onClick={clearFilters} className="h-10 text-muted-foreground hover:text-foreground">
+                                    Reset Filters
                                 </Button>
                             )}
                         </div>
 
                         {showFilters && (
-                            <div className="mt-4 grid gap-4 rounded-md border bg-muted/50 p-4 md:grid-cols-2">
-                                <div className="space-y-2">
-                                    <Label>Date From</Label>
-                                    <Input type="date" value={dateFilter.from} onChange={e => setDateFilter(d => ({ ...d, from: e.target.value }))} />
+                            <div className="grid gap-4 pt-4 border-t grid-cols-1 sm:grid-cols-3 animate-in fade-in duration-200">
+                                <div className="space-y-1.5">
+                                    <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><Layers className="size-3" /> Order Sales Channel</Label>
+                                    <Select value={channel} onValueChange={(v) => { setChannel(v); applyFilters({ channel: v }); }}>
+                                        <SelectTrigger className="h-10"><SelectValue placeholder="Channel Filter" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All Channels</SelectItem>
+                                            <SelectItem value="pos">POS Terminal</SelectItem>
+                                            <SelectItem value="online">Online Marketplace</SelectItem>
+                                            <SelectItem value="manual">Manual Entry</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>Date To</Label>
-                                    <Input type="date" value={dateFilter.to} onChange={e => setDateFilter(d => ({ ...d, to: e.target.value }))} />
+                                <div className="space-y-1.5">
+                                    <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><Calendar className="size-3" /> Timeline Date From</Label>
+                                    <Input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); applyFilters({ start_date: e.target.value }); }} className="h-10" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><Calendar className="size-3" /> Timeline Date To</Label>
+                                    <Input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); applyFilters({ end_date: e.target.value }); }} className="h-10" />
                                 </div>
                             </div>
                         )}
                     </CardContent>
                 </Card>
 
-                {/* ── Table ─────────────────────────────────────── */}
-                <Card className="flex-1 overflow-hidden">
+                {/* ── Table Grid Dataset Matrix ── */}
+                <Card className="flex-1 overflow-hidden shadow-sm bg-card text-card-foreground">
                     <div className="h-full overflow-auto">
                         <Table>
-                            <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                            <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
                                 <TableRow>
-                                    <TableHead>Order No</TableHead>
-                                    <TableHead>Date</TableHead>
-                                    <TableHead>Customer</TableHead>
-                                    <TableHead>Channel</TableHead>
-                                    <TableHead className="text-right">Items</TableHead>
-                                    <TableHead className="text-right">Subtotal</TableHead>
-                                    <TableHead className="text-right">Tax</TableHead>
-                                    <TableHead className="text-right">Discount</TableHead>
-                                    <TableHead className="text-right">Total</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead className="text-right">Actions</TableHead>
+                                    <TableHead className="font-semibold">Order ID</TableHead>
+                                    <TableHead className="font-semibold">Date</TableHead>
+                                    <TableHead className="font-semibold">Customer Account</TableHead>
+                                    <TableHead className="font-semibold">Channel</TableHead>
+                                    <TableHead className="text-right font-semibold">SKUs</TableHead>
+                                    <TableHead className="text-right font-semibold">Subtotal</TableHead>
+                                    <TableHead className="text-right font-semibold">Tax</TableHead>
+                                    <TableHead className="text-right font-semibold">Discount</TableHead>
+                                    <TableHead className="text-right font-semibold">Grand Total</TableHead>
+                                    <TableHead className="font-semibold">Status</TableHead>
+                                    <TableHead className="text-right font-semibold">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredSales.length > 0 ? (
-                                    filteredSales.map(sale => (
-                                        <SaleRow key={sale.id} sale={sale} />
+                                {sales.data.length > 0 ? (
+                                    sales.data.map((sale) => (
+                                        <TableRow key={sale.id} className="hover:bg-muted/40 transition-colors border-b">
+                                            <TableCell className="font-mono font-bold text-primary">{sale.order_number}</TableCell>
+                                            <TableCell className="whitespace-nowrap">{fmtDate(sale.created_at)}</TableCell>
+                                            <TableCell>
+                                                <div className="font-medium">{sale.customer?.name ?? 'Walk-In'}</div>
+                                                <div className="text-xs text-muted-foreground font-mono">{sale.customer?.phone ?? '-'}</div>
+                                            </TableCell>
+                                            <TableCell><Badge variant="outline" className="capitalize text-[11px] font-medium">{sale.order_channel}</Badge></TableCell>
+                                            <TableCell className="text-right font-mono">{sale.items_count}</TableCell>
+                                            <TableCell className="text-right font-mono text-muted-foreground">{INR(sale.subtotal)}</TableCell>
+                                            <TableCell className="text-right font-mono text-muted-foreground">{INR(sale.tax_amount)}</TableCell>
+                                            <TableCell className="text-right font-mono text-destructive/80">{INR(sale.discount_amount)}</TableCell>
+                                            <TableCell className="text-right font-mono font-bold text-foreground">{INR(sale.total_amount)}</TableCell>
+                                            <TableCell><StatusBadge status={sale.status} /></TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex justify-end gap-1">
+                                                    <Button variant="ghost" size="icon" onClick={() => router.visit(`/warehouse/sales/${sale.id}`)} title="Inspect Detail Ledger">
+                                                        <Eye className="size-4 text-muted-foreground hover:text-foreground" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon" onClick={() => window.open(`/warehouse/sales/${sale.id}/print`, '_blank')} title="Print Legal Invoice">
+                                                        <Printer className="size-4 text-muted-foreground hover:text-foreground" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
                                     ))
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
-                                            {hasActiveFilters ? 'No sales match your filters.' : 'No sales yet.'}
+                                        <TableCell colSpan={11} className="h-32 text-center text-muted-foreground bg-muted/10">
+                                            No sales records match the selection criteria.
                                         </TableCell>
                                     </TableRow>
                                 )}
@@ -315,81 +374,42 @@ export default function SalesList({ sales }: Props) {
                     </div>
                 </Card>
 
-                {/* ── Pagination ────────────────────────────────── */}
+                {/* ── Pagination ── */}
                 {sales.last_page > 1 && (
-                    <Card>
-                        <CardContent className="flex items-center justify-between p-4">
-                            <div className="text-sm text-muted-foreground">
-                                Page {sales.current_page} of {sales.last_page} • {sales.total} total sales
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" disabled={sales.current_page === 1} onClick={() => navigatePage(sales.current_page - 1)}>
-                                    Previous
-                                </Button>
-                                {/* Show page numbers when there aren't too many */}
-                                {sales.last_page <= 7 && Array.from({ length: sales.last_page }, (_, i) => i + 1).map(p => (
+                    <div className="flex items-center justify-between px-6 py-4 border rounded-lg bg-muted/20 shadow-sm mt-1 text-card-foreground">
+                        <div className="text-sm text-muted-foreground font-medium">
+                            Viewing page <span className="font-semibold text-foreground">{sales.current_page}</span> of <span className="font-semibold text-foreground">{sales.last_page}</span> • Found <span className="font-semibold text-foreground">{sales.total}</span> entries
+                        </div>
+                        <div className="flex items-center gap-1">
+                            {sales.links.map((link, i) => {
+                                const isLabelCode = link.label.includes('&laquo;') || link.label.includes('&raquo;');
+                                let visibleLabel = link.label;
+                                if (link.label.includes('&laquo;')) visibleLabel = "Previous";
+                                if (link.label.includes('&raquo;')) visibleLabel = "Next";
+
+                                return (
                                     <Button
-                                        key={p}
-                                        variant={p === sales.current_page ? 'default' : 'outline'}
+                                        key={i}
+                                        variant={link.active ? "default" : "outline"}
                                         size="sm"
-                                        onClick={() => navigatePage(p)}
+                                        disabled={!link.url}
+                                        onClick={() => {
+                                            if (link.url) {
+                                                router.get(link.url, {}, { preserveState: true });
+                                            }
+                                        }}
+                                        className={`h-9 font-medium ${isLabelCode ? 'px-3' : 'min-w-[36px]'} ${!link.url && 'opacity-40 cursor-not-allowed'}`}
                                     >
-                                        {p}
+                                        {visibleLabel === "Previous" ? <ChevronLeft className="size-4 mr-0.5" /> : null}
+                                        {visibleLabel}
+                                        {visibleLabel === "Next" ? <ChevronRight className="size-4 ml-0.5" /> : null}
                                     </Button>
-                                ))}
-                                <Button variant="outline" size="sm" disabled={sales.current_page === sales.last_page} onClick={() => navigatePage(sales.current_page + 1)}>
-                                    Next
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
+                                );
+                            })}
+                        </div>
+                    </div>
                 )}
             </div>
         </AppLayout>
     );
 }
-
-// ─────────────────────────────────────────────
-// Memoized sub-components
-// ─────────────────────────────────────────────
-const StatCard = React.memo(({ icon, bg, label, value }: { icon: React.ReactNode; bg: string; label: string; value: string | number }) => (
-    <Card>
-        <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-                <div className={`rounded-full p-3 ${bg}`}>{icon}</div>
-                <div>
-                    <div className="text-sm text-muted-foreground">{label}</div>
-                    <div className="text-2xl font-bold">{value}</div>
-                </div>
-            </div>
-        </CardContent>
-    </Card>
-));
-
-const SaleRow = React.memo(({ sale }: { sale: Sale }) => (
-    <TableRow className="hover:bg-accent/50">
-        <TableCell className="font-mono font-medium">{sale.order_number}</TableCell>
-        <TableCell>{fmtDate(sale.created_at)}</TableCell>
-        <TableCell>
-            <div className="font-medium">{sale.customer?.name ?? 'Walk-in Customer'}</div>
-            <div className="text-sm text-muted-foreground">{sale.customer?.phone ?? '-'}</div>
-        </TableCell>
-        <TableCell><Badge variant="outline">{sale.order_channel}</Badge></TableCell>
-        <TableCell className="text-right">{sale.items?.length ?? 0}</TableCell>
-        <TableCell className="text-right">{fmtCurrency(sale.subtotal)}</TableCell>
-        <TableCell className="text-right">{fmtCurrency(sale.tax_amount)}</TableCell>
-        <TableCell className="text-right">{fmtCurrency(sale.discount_amount)}</TableCell>
-        <TableCell className="text-right font-semibold">{fmtCurrency(sale.total_amount)}</TableCell>
-        <TableCell><StatusBadge status={sale.status} /></TableCell>
-        <TableCell className="text-right">
-            <div className="flex justify-end gap-1">
-                <Button variant="ghost" size="icon" onClick={() => router.visit(`/warehouse/sales/${sale.id}`)} title="View">
-                    <Eye className="size-4" />
-                </Button>
-                <Button variant="ghost" size="icon" onClick={() => window.open(`/warehouse/sales/${sale.id}/print`, '_blank')} title="Print">
-                    <Printer className="size-4" />
-                </Button>
-            </div>
-        </TableCell>
-    </TableRow>
-));

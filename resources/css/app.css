@@ -59,6 +59,27 @@
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-ring: var(--sidebar-ring);
+
+    /* ADDED LATTER */
+    --animate-inline-loading: inline-loading 1.2s infinite linear;
+
+    --color-hardware-active-bg: var(--hardware-active-bg);
+    --color-hardware-active-text: var(--hardware-active-text);
+    --color-hardware-active-border: var(--hardware-active-border);
+
+    --color-hardware-connecting-bg: var(--hardware-connecting-bg);
+    --color-hardware-connecting-text: var(--hardware-connecting-text);
+    --color-hardware-connecting-border: var(--hardware-connecting-border);
+
+    --color-hardware-missing-bg: var(--hardware-missing-bg);
+    --color-hardware-missing-text: var(--hardware-missing-text);
+    --color-hardware-missing-border: var(--hardware-missing-border);
+
+    @keyframes inline-loading {
+      0% { transform: translateX(-100%) scaleX(1); }
+      50% { transform: translateX(100%) scaleX(2); }
+      100% { transform: translateX(300%) scaleX(1); }
+    }
 }
 
 :root {
@@ -111,6 +132,19 @@
 
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.596 0.145 163.225);
+
+    /* ADDED LATTER */
+    --hardware-active-bg: oklch(0.962 0.018 161.812);
+    --hardware-active-text: oklch(0.266 0.065 160.833);
+    --hardware-active-border: oklch(0.895 0.038 162.774);
+
+    --hardware-connecting-bg: oklch(0.978 0.016 85.938);
+    --hardware-connecting-text: oklch(0.28 0.045 80.0);
+    --hardware-connecting-border: oklch(0.92 0.03 85.0);
+
+    --hardware-missing-bg: oklch(0.963 0.017 27.325);
+    --hardware-missing-text: oklch(0.27 0.07 27.0);
+    --hardware-missing-border: oklch(0.91 0.04 27.0);
 }
 
 .dark {
@@ -161,6 +195,19 @@
 
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.596 0.145 163.225);
+
+    /* ADDED LATTER */
+    --hardware-active-bg: oklch(0.25 0.04 160.0 / 20%);
+    --hardware-active-text: oklch(0.85 0.04 160.0);
+    --hardware-active-border: oklch(0.35 0.04 160.0 / 40%);
+
+    --hardware-connecting-bg: oklch(0.25 0.03 80.0 / 20%);
+    --hardware-connecting-text: oklch(0.85 0.03 80.0);
+    --hardware-connecting-border: oklch(0.35 0.03 80.0 / 40%);
+
+    --hardware-missing-bg: oklch(0.25 0.05 27.0 / 20%);
+    --hardware-missing-text: oklch(0.85 0.05 27.0);
+    --hardware-missing-border: oklch(0.35 0.05 27.0 / 40%);
 }
 
 @layer base {

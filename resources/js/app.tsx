@@ -6,7 +6,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { initializeTheme } from './hooks/use-appearance';
-import { Toaster } from './components/ui/sonner';
+import OfflineToast from '@/components/special/offline-toast';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
@@ -23,7 +23,7 @@ createInertiaApp({
         root.render(
             <StrictMode>
                 <App {...props} />
-                <Toaster />
+                <OfflineToast />
             </StrictMode>,
         );
     },
@@ -32,5 +32,34 @@ createInertiaApp({
     },
 });
 
-// This will set light / dark mode on load...
 initializeTheme();
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker
+            .register('/sw.js', { scope: '/' })
+            .then((registration) => {
+                console.info('[PWA] Service worker registered:', registration.scope);
+                setInterval(() => {
+                    registration.update();
+                }, 60 * 60 * 1000);
+
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    if (!newWorker) return;
+
+                    newWorker.addEventListener('statechange', () => {
+                        if (
+                            newWorker.state === 'installed' &&
+                            navigator.serviceWorker.controller
+                        ) {
+                            console.info('[PWA] New content available — will update on next load.');
+                        }
+                    });
+                });
+            })
+            .catch((error) => {
+                console.error('[PWA] Service worker registration failed:', error);
+            });
+    });
+}

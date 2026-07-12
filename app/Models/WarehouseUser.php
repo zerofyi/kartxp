@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WarehouseUser extends Model
 {
+    protected $table = 'warehouse_users';
+
     protected $fillable = [
         'warehouse_id',
         'user_id',
@@ -21,25 +23,18 @@ class WarehouseUser extends Model
         'joined_at' => 'datetime',
     ];
 
-    /**
-     * Get the warehouse node context linked to this record.
-     */
     public function warehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class);
     }
 
-    /**
-     * Get the system user account profile identity records.
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
     /**
-     * Get all historical and active delivery manifests mapped to this operator context.
-     * Maps local user_id value to foreign agent_id references within deliveries schema.
+     * Pulls historical deliveries handled by this staff worker.
      */
     public function deliveries(): HasMany
     {

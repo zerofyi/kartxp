@@ -59,12 +59,12 @@ return [
             'throw' => false,
             'report' => false,
         ],
-        'public_html' => [
-            'driver' => 'local',
-            'root' => base_path('public_html/storage'),
-            'visibility' => 'public',
-            'throw' => false,
-        ],
+        // 'public_html' => [
+        //     'driver' => 'local',
+        //     'root' => base_path('public_html/storage'),
+        //     'visibility' => 'public',
+        //     'throw' => false,
+        // ],
 
     ],
 

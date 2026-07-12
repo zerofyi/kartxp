@@ -16,14 +16,8 @@ use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable, TwoFactorAuthenticatable, HasApiTokens, SoftDeletes, HasRoles;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
     protected $fillable = [
         'name',
         'email',
@@ -37,11 +31,6 @@ class User extends Authenticatable
         'phone_verified_at',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'two_factor_secret',
@@ -49,11 +38,6 @@ class User extends Authenticatable
         'remember_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -62,7 +46,6 @@ class User extends Authenticatable
             'last_login_at'           => 'datetime',
             'password'                => 'hashed',
             'two_factor_confirmed_at' => 'datetime',
-            //'status'                  => 'boolean',
         ];
     }
 
@@ -70,25 +53,18 @@ class User extends Authenticatable
     // Relationships
     // -----------------------------------------------------------------------
 
-    public function devices(): HasMany
+    /**
+     * The exclusive warehouse owned by this user (Strict 1-to-1).
+     */
+    public function ownedWarehouse(): HasOne
     {
-        return $this->hasMany(UserDevice::class);
-    }
-
-    public function warehouseUsers(): HasMany
-    {
-        return $this->hasMany(WarehouseUser::class);
-    }
-
-    public function currentWarehouse(): ?Warehouse
-    {
-        return $this->warehouses()->first();
+        return $this->hasOne(Warehouse::class, 'user_id');
     }
 
     /**
-     * Warehouses this user belongs to.
+     * Warehouses this user is assigned to work at as an employee/staff.
      */
-    public function warehouses(): BelongsToMany
+    public function staffWarehouses(): BelongsToMany
     {
         return $this->belongsToMany(
             Warehouse::class,
@@ -98,6 +74,19 @@ class User extends Authenticatable
         )
         ->withPivot(['role', 'is_active', 'joined_at'])
         ->withTimestamps();
+    }
+
+    /**
+     * Direct relationship to historical or active delivery manifests.
+     */
+    public function deliveries(): HasMany
+    {
+        return $this->hasMany(Delivery::class, 'agent_id');
+    }
+
+    public function devices(): HasMany
+    {
+        return $this->hasMany(UserDevice::class);
     }
 
     public function customer(): HasOne
@@ -110,17 +99,17 @@ class User extends Authenticatable
         return $this->hasMany(Address::class);
     }
 
+    public function warehouseUsers(): HasMany
+    {
+        return $this->hasMany(WarehouseUser::class, 'user_id');
+    }
+
     // -----------------------------------------------------------------------
     // Scopes
     // -----------------------------------------------------------------------
 
     public function scopeActive(Builder $query): Builder
     {
-        return $query->where('status', true);
-    }
-
-    public function scopeByRole(Builder $query, string $role): Builder
-    {
-        return $query->role($role);
+        return $query->where('status', 'active');
     }
 }

@@ -1,19 +1,21 @@
 import { Head, Link, router } from '@inertiajs/react';
 import {
-    Activity,
     AlertTriangle,
     ArrowDownRight,
     ArrowUpRight,
     CalendarDays,
     Clock,
     CreditCard,
-    Package,
-    ShoppingBag,
+    RotateCcw,
     ShoppingCart,
     Timer,
-    TrendingUp,
     Truck,
     Users,
+    Skull,
+    ExternalLink,
+    Percent,
+    Layers,
+    TrendingUp,
 } from 'lucide-react';
 import { useState } from 'react';
 import {
@@ -33,10 +35,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Stats {
     today_revenue: number;
@@ -56,6 +56,7 @@ interface Stats {
     pos_growth: number;
     low_stock: number;
     near_expiry: number;
+    expired_count: number;
     pending_deliveries: number;
     today_customers: number;
     month_customers: number;
@@ -88,22 +89,13 @@ interface NearExpiryItem {
     available_quantity: number;
     product_variant?: {
         id: number;
-        name: string;
         sku: string;
         product?: { id: number; name: string };
     };
 }
 
-interface LowStockItem {
-    id: number;
-    name: string;
-    sku: string;
-    stock_alert_qty: number;
-    available_qty: number;
-    product?: { id: number; name: string };
-}
-
 interface TopProduct {
+    variant_id: number;
     name: string;
     sku: string;
     total_qty: number;
@@ -111,25 +103,17 @@ interface TopProduct {
 }
 
 interface Props {
-    stats: Stats;
-    recent_orders: Order[];
-    revenue_chart: ChartPoint[];
-    near_expiry_stock: NearExpiryItem[];
-    low_stock_items: LowStockItem[];
-    top_products: TopProduct[];
+    stats?: Stats;
+    recent_orders?: Order[];
+    revenue_chart?: ChartPoint[];
+    near_expiry_stock?: NearExpiryItem[];
+    top_products?: TopProduct[];
     expiry_days: number;
     expiry_windows: number[];
+    filters: { top_period: string; top_metric: string };
 }
 
-// ---------------------------------------------------------------------------
-// Breadcrumbs
-// ---------------------------------------------------------------------------
-
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Dashboard', href: dashboard().url }];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(amount);
@@ -147,33 +131,22 @@ const getDaysUntilExpiry = (dateStr: string): number => {
 };
 
 const getExpiryBadge = (daysLeft: number) => {
-    if (daysLeft <= 7)  return 'bg-red-50 text-red-700 border-red-200';
-    if (daysLeft <= 14) return 'bg-orange-50 text-orange-700 border-orange-200';
-    return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+    if (daysLeft <= 0) return 'border-destructive text-destructive bg-destructive/10';
+    if (daysLeft <= 7)  return 'border-orange-500 text-orange-600 bg-orange-500/5';
+    return 'text-muted-foreground bg-muted border-border';
 };
 
 const getStatusColor = (status: string): string => {
     const map: Record<string, string> = {
-        pending:    'bg-yellow-50 text-yellow-700 border-yellow-200',
-        processing: 'bg-blue-50 text-blue-700 border-blue-200',
-        packed:     'bg-indigo-50 text-indigo-700 border-indigo-200',
-        dispatched: 'bg-purple-50 text-purple-700 border-purple-200',
-        delivered:  'bg-green-50 text-green-700 border-green-200',
-        cancelled:  'bg-red-50 text-red-700 border-red-200',
+        pending:    'text-amber-500 border-amber-500/30 bg-amber-500/10',
+        processing: 'text-sky-500 border-sky-500/30 bg-sky-500/10',
+        packed:     'text-indigo-500 border-indigo-500/30 bg-indigo-500/10',
+        dispatched: 'text-purple-500 border-purple-500/30 bg-purple-500/10',
+        delivered:  'text-emerald-500 border-emerald-500/30 bg-emerald-500/10',
+        cancelled:  'text-destructive border-destructive/30 bg-destructive/10',
     };
-    return map[status?.toLowerCase()] ?? 'bg-gray-50 text-gray-700 border-gray-200';
+    return map[status?.toLowerCase()] ?? 'text-muted-foreground border-border bg-muted';
 };
-
-const GrowthBadge = ({ value }: { value: number }) => (
-    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${value >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-        {value >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-        {Math.abs(value)}% vs last month
-    </span>
-);
-
-// ---------------------------------------------------------------------------
-// Stat Card
-// ---------------------------------------------------------------------------
 
 interface StatCardProps {
     title: string;
@@ -184,44 +157,61 @@ interface StatCardProps {
     mode: 'today' | 'month';
     alert?: boolean;
     subtitle?: string;
+    loading?: boolean;
 }
 
-const StatCard = ({ title, icon, todayValue, monthValue, growth, mode, alert, subtitle }: StatCardProps) => (
-    <Card className={alert ? 'border-red-200 bg-red-50/30' : ''}>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-            <div className={alert ? 'text-red-500' : 'text-muted-foreground'}>{icon}</div>
-        </CardHeader>
-        <CardContent className="space-y-1">
-            <div className={`text-2xl font-bold tracking-tight ${alert ? 'text-red-600' : ''}`}>
-                {mode === 'today' ? todayValue : monthValue}
-            </div>
-            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
-            {growth !== undefined && mode === 'month' && <GrowthBadge value={growth} />}
-            {mode === 'today' && (
-                <p className="text-xs text-muted-foreground">
-                    Month total: <span className="font-medium">{monthValue}</span>
-                </p>
-            )}
-        </CardContent>
-    </Card>
-);
-
-// ---------------------------------------------------------------------------
-// Custom Tooltip for chart
-// ---------------------------------------------------------------------------
+const StatCard = ({ title, icon, todayValue, monthValue, growth, mode, alert, subtitle, loading }: StatCardProps) => {
+    if (loading) {
+        return (
+            <Card className="border border-border p-4">
+                <div className="flex justify-between items-center"><Skeleton className="h-4 w-20" /><Skeleton className="h-4 w-4" /></div>
+                <Skeleton className="h-7 w-28" />
+                <Skeleton className="h-3 w-36" />
+            </Card>
+        );
+    }
+    return (
+        <Card className={`border transition-all duration-200 ${alert ? 'border-destructive/30 bg-destructive/5' : 'border-border'}`}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5 px-4">
+                <CardTitle className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{title}</CardTitle>
+                <div className={alert ? 'text-destructive' : 'text-muted-foreground'}>{icon}</div>
+            </CardHeader>
+            <CardContent className="space-y-1 px-4">
+                <div className="flex items-baseline justify-between">
+                    <span className="text-xl font-bold tracking-tight">
+                        {mode === 'today' ? todayValue : monthValue}
+                    </span>
+                    {growth !== undefined && mode === 'month' && (
+                        <span className={`inline-flex items-center gap-0.5 text-xs font-semibold ${growth >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>
+                            {growth >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                            {Math.abs(growth)}%
+                        </span>
+                    )}
+                </div>
+                {subtitle ? (
+                    <p className="text-[11px] text-muted-foreground">{subtitle}</p>
+                ) : (
+                    mode === 'today' && (
+                        <p className="text-[11px] text-muted-foreground">
+                            Month total: <span className="font-semibold text-foreground">{monthValue}</span>
+                        </p>
+                    )
+                )}
+            </CardContent>
+        </Card>
+    );
+};
 
 const ChartTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     return (
-        <div className="rounded-lg border bg-background p-3 shadow-md text-xs space-y-1">
-            <p className="font-semibold text-sm mb-1">{label}</p>
+        <div className="rounded-md border border-border bg-background p-2.5 shadow-sm text-xs space-y-1">
+            <p className="font-bold border-b border-border pb-1 mb-1">{label}</p>
             {payload.map((p: any) => (
-                <div key={p.name} className="flex items-center gap-2">
-                    <div className="h-2 w-2 rounded-full" style={{ background: p.color }} />
+                <div key={p.name} className="flex items-center justify-between gap-4">
                     <span className="text-muted-foreground capitalize">{p.name.replace('_', ' ')}:</span>
-                    <span className="font-medium">
-                        {p.name === 'revenue' ? formatCurrencyShort(p.value) : p.value}
+                    <span className="font-bold text-foreground">
+                        {p.name === 'revenue' ? formatCurrency(p.value) : p.value}
                     </span>
                 </div>
             ))}
@@ -229,478 +219,558 @@ const ChartTooltip = ({ active, payload, label }: any) => {
     );
 };
 
-// ---------------------------------------------------------------------------
-// Main Component
-// ---------------------------------------------------------------------------
-
 export default function Dashboard({
     stats,
     recent_orders = [],
     revenue_chart = [],
     near_expiry_stock = [],
-    low_stock_items = [],
     top_products = [],
     expiry_days,
     expiry_windows,
+    filters,
 }: Props) {
     const [mode, setMode] = useState<'today' | 'month'>('today');
     const [chartMetric, setChartMetric] = useState<'revenue' | 'orders'>('revenue');
+    const [isClearing, setIsClearing] = useState(false);
+
+    const loadingStats = !stats;
+    const loadingChart = !revenue_chart || revenue_chart.length === 0;
+    const loadingTopProducts = !top_products || top_products.length === 0;
 
     const handleExpiryWindow = (days: number) => {
         router.get(window.location.pathname, { expiry_days: days }, { preserveState: true, preserveScroll: true });
     };
 
-    // Determine max revenue for top-products bar scaling
-    const maxProductRevenue = Math.max(...top_products.map(p => p.total_revenue), 1);
+    const handleTopProductFilters = (period: string, metric: string) => {
+        router.get(window.location.pathname, {
+            expiry_days: expiry_days,
+            top_period: period,
+            top_metric: metric
+        }, { preserveState: true, preserveScroll: true });
+    };
+
+    const triggerCachePurge = () => {
+        setIsClearing(true);
+        router.post('/warehouse/maintenance/dashboard/clear-cache', {}, {
+            onFinish: () => setIsClearing(false)
+        });
+    };
+
+    const maxProductBarValue = top_products.length > 0
+        ? Math.max(...top_products.map(p => filters.top_metric === 'units' ? p.total_qty : p.total_revenue), 1)
+        : 1;
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Warehouse Dashboard" />
 
-            <div className="flex h-full flex-1 flex-col gap-6 overflow-x-auto p-6">
+            <div className="flex h-full flex-1 flex-col gap-5 p-6 bg-background">
 
-                {/* ── Header ── */}
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                {/* Control Action Header Deck */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-4">
                     <div>
-                        <h2 className="text-2xl font-bold tracking-tight">Warehouse Dashboard</h2>
-                        <p className="text-sm text-muted-foreground">
-                            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                        <h2 className="text-xl font-bold tracking-tight text-foreground">Warehouse Dashboard</h2>
+                        <p className="text-xs text-muted-foreground">
+                            Data updated: {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}
                         </p>
                     </div>
 
-                    {/* Today / Month toggle */}
-                    <div className="flex items-center gap-1 rounded-lg border bg-muted p-1 self-start sm:self-auto">
-                        <button
-                            onClick={() => setMode('today')}
-                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                                mode === 'today' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                        >
-                            <Clock className="h-3.5 w-3.5" /> Today
-                        </button>
-                        <button
-                            onClick={() => setMode('month')}
-                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                                mode === 'month' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                        >
-                            <CalendarDays className="h-3.5 w-3.5" /> This Month
-                        </button>
+                    <div className="flex items-center gap-2">
+
+                        <div className="flex items-center rounded-md border border-border bg-muted p-0.5">
+                            <button
+                                onClick={() => setMode('today')}
+                                className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold transition-all ${
+                                    mode === 'today' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+                                }`}
+                            >
+                                <Clock className="h-3 w-3" /> Today
+                            </button>
+                            <button
+                                onClick={() => setMode('month')}
+                                className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold transition-all ${
+                                    mode === 'month' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+                                }`}
+                            >
+                                <CalendarDays className="h-3 w-3" /> Month
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                {/* ── KPI Cards (row 1) ── */}
+                {/* Financial Metric Grid */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <StatCard
-                        title="Revenue"
+                        title="Paid Revenue"
                         icon={<TrendingUp className="h-4 w-4" />}
-                        todayValue={formatCurrency(stats.today_revenue)}
-                        monthValue={formatCurrency(stats.month_revenue)}
-                        growth={stats.revenue_growth}
+                        todayValue={formatCurrency(stats?.today_revenue ?? 0)}
+                        monthValue={formatCurrency(stats?.month_revenue ?? 0)}
+                        growth={stats?.revenue_growth}
                         mode={mode}
+                        loading={loadingStats}
                     />
                     <StatCard
-                        title="Revenue (Pending)"
-                        icon={<TrendingUp className="h-4 w-4" />}
-                        todayValue={formatCurrency(stats.today_revenue_pending)}
-                        monthValue={formatCurrency(stats.month_revenue_pending)}
-                        growth={stats.revenue_growth_pending}
+                        title="Pending Revenue"
+                        icon={<CreditCard className="h-4 w-4" />}
+                        todayValue={formatCurrency(stats?.today_revenue_pending ?? 0)}
+                        monthValue={formatCurrency(stats?.month_revenue_pending ?? 0)}
+                        growth={stats?.revenue_growth_pending}
                         mode={mode}
+                        loading={loadingStats}
                     />
-                    {/* <StatCard
-                        title="Total Orders"
-                        icon={<ShoppingBag className="h-4 w-4" />}
-                        todayValue={stats.today_orders.toLocaleString()}
-                        monthValue={stats.month_orders.toLocaleString()}
-                        growth={stats.orders_growth}
-                        mode={mode}
-                    /> */}
                     <StatCard
                         title="Online Orders"
                         icon={<ShoppingCart className="h-4 w-4" />}
-                        todayValue={stats.today_online.toLocaleString()}
-                        monthValue={stats.month_online.toLocaleString()}
-                        growth={stats.online_growth}
+                        todayValue={(stats?.today_online ?? 0).toLocaleString()}
+                        monthValue={(stats?.month_online ?? 0).toLocaleString()}
+                        growth={stats?.online_growth}
                         mode={mode}
+                        loading={loadingStats}
                     />
                     <StatCard
                         title="POS Sales"
                         icon={<CreditCard className="h-4 w-4" />}
-                        todayValue={stats.today_pos.toLocaleString()}
-                        monthValue={stats.month_pos.toLocaleString()}
-                        growth={stats.pos_growth}
+                        todayValue={(stats?.today_pos ?? 0).toLocaleString()}
+                        monthValue={(stats?.month_pos ?? 0).toLocaleString()}
+                        growth={stats?.pos_growth}
                         mode={mode}
+                        loading={loadingStats}
                     />
                 </div>
 
-                {/* ── KPI Cards (row 2) ── */}
+                {/* Vector Risk Management Grid */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <StatCard
-                        title="Low Stock Alerts"
+                        title="Low Stock Items"
                         icon={<AlertTriangle className="h-4 w-4" />}
-                        todayValue={stats.low_stock}
-                        monthValue={stats.low_stock}
+                        todayValue={stats?.low_stock ?? 0}
+                        monthValue={stats?.low_stock ?? 0}
                         mode={mode}
-                        alert={stats.low_stock > 0}
-                        subtitle="Products below alert threshold"
+                        alert={(stats?.low_stock ?? 0) > 0}
+                        subtitle="SKUs below safety limits"
+                        loading={loadingStats}
                     />
                     <StatCard
-                        title="Near Expiry (30d)"
-                        icon={<Timer className="h-4 w-4" />}
-                        todayValue={stats.near_expiry}
-                        monthValue={stats.near_expiry}
+                        title="Expired Stock"
+                        icon={<Skull className="h-4 w-4" />}
+                        todayValue={stats?.expired_count ?? 0}
+                        monthValue={stats?.expired_count ?? 0}
                         mode={mode}
-                        alert={stats.near_expiry > 0}
-                        subtitle="Batches expiring within 30 days"
+                        alert={(stats?.expired_count ?? 0) > 0}
+                        subtitle="Expired batches (Total loss)"
+                        loading={loadingStats}
+                    />
+                    <StatCard
+                        title="Near Expiry"
+                        icon={<Timer className="h-4 w-4" />}
+                        todayValue={stats?.near_expiry ?? 0}
+                        monthValue={stats?.near_expiry ?? 0}
+                        mode={mode}
+                        alert={(stats?.near_expiry ?? 0) > 0}
+                        subtitle="Expiring within 30 days"
+                        loading={loadingStats}
                     />
                     <StatCard
                         title="Pending Deliveries"
                         icon={<Truck className="h-4 w-4" />}
-                        todayValue={stats.pending_deliveries}
-                        monthValue={stats.pending_deliveries}
+                        todayValue={stats?.pending_deliveries ?? 0}
+                        monthValue={stats?.pending_deliveries ?? 0}
                         mode={mode}
-                        subtitle="Awaiting dispatch / in transit"
-                    />
-                    <StatCard
-                        title="New Customers"
-                        icon={<Users className="h-4 w-4" />}
-                        todayValue={stats.today_customers}
-                        monthValue={stats.month_customers}
-                        mode={mode}
-                        subtitle={mode === 'today' ? 'Registered today' : 'Registered this month'}
+                        subtitle="Awaiting courier dispatch"
+                        loading={loadingStats}
                     />
                 </div>
 
-                {/* ── Revenue Chart + Quick Actions ── */}
-                <div className="grid gap-4 lg:grid-cols-7">
-                    {/* Chart */}
-                    <Card className="lg:col-span-5">
-                        <CardHeader className="flex flex-row items-center justify-between pb-2">
-                            <CardTitle className="text-base">6-Month Trend</CardTitle>
-                            <div className="flex items-center gap-1 rounded-lg border bg-muted p-1">
-                                <button
-                                    onClick={() => setChartMetric('revenue')}
-                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                                        chartMetric === 'revenue' ? 'bg-background shadow-sm' : 'text-muted-foreground'
-                                    }`}
+                {/* 6-Month Trend Original Area Graph + High Density Uniform Side Tiles */}
+                <div className="grid gap-4 lg:grid-cols-12">
+
+                    {/* Trend Graph Container - Spans exactly 3 StatCards width */}
+                    <Card className="border border-border lg:col-span-9 flex flex-col justify-between">
+                        <CardHeader className="flex flex-col gap-3 pb-2 pt-4 px-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+                            <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                                Performance Trends
+                            </CardTitle>
+
+                            <div className="flex items-center gap-2">
+                                {/* Dynamic Refresh Action */}
+                                <Button
+                                    onClick={triggerCachePurge}
+                                    disabled={isClearing}
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2.5 gap-1 text-[11px] font-semibold text-muted-foreground border-border hover:text-foreground"
                                 >
-                                    Revenue
-                                </button>
-                                <button
-                                    onClick={() => setChartMetric('orders')}
-                                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                                        chartMetric === 'orders' ? 'bg-background shadow-sm' : 'text-muted-foreground'
-                                    }`}
-                                >
-                                    Orders
-                                </button>
+                                    <RotateCcw className={`h-3 w-3 ${isClearing ? 'animate-spin' : ''}`} />
+                                    Refresh Chart
+                                </Button>
+
+                                {/* Unified Metric Context Toggles */}
+                                <div className="flex items-center h-7 rounded-md border border-border bg-muted p-0.5">
+                                    <button
+                                        onClick={() => setChartMetric('revenue')}
+                                        className={`rounded px-2.5 h-full text-xs font-semibold transition-all ${
+                                            chartMetric === 'revenue'
+                                                ? 'bg-background text-foreground shadow-sm'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                    >
+                                        Revenue
+                                    </button>
+                                    <button
+                                        onClick={() => setChartMetric('orders')}
+                                        className={`rounded px-2.5 h-full text-xs font-semibold transition-all ${
+                                            chartMetric === 'orders'
+                                                ? 'bg-background text-foreground shadow-sm'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                    >
+                                        Orders
+                                    </button>
+                                </div>
                             </div>
                         </CardHeader>
-                        <CardContent>
-                            <ResponsiveContainer width="100%" height={240}>
-                                {chartMetric === 'revenue' ? (
-                                    <AreaChart data={revenue_chart} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                                        <defs>
-                                            <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.2} />
-                                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                                        <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                                        <YAxis tickFormatter={formatCurrencyShort} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={60} />
-                                        <Tooltip content={<ChartTooltip />} />
-                                        <Area type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2} fill="url(#revGrad)" dot={{ r: 3, fill: '#6366f1' }} />
-                                    </AreaChart>
-                                ) : (
-                                    <AreaChart data={revenue_chart} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                                        <defs>
-                                            <linearGradient id="onlineGrad" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%"  stopColor="#06b6d4" stopOpacity={0.2} />
-                                                <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
-                                            </linearGradient>
-                                            <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.2} />
-                                                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                                        <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                                        <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
-                                        <Tooltip content={<ChartTooltip />} />
-                                        <Area type="monotone" dataKey="online_orders" stroke="#06b6d4" strokeWidth={2} fill="url(#onlineGrad)" dot={{ r: 3, fill: '#06b6d4' }} />
-                                        <Area type="monotone" dataKey="pos_orders"    stroke="#f59e0b" strokeWidth={2} fill="url(#posGrad)"   dot={{ r: 3, fill: '#f59e0b' }} />
-                                    </AreaChart>
-                                )}
-                            </ResponsiveContainer>
-                        </CardContent>
-                    </Card>
-
-                    {/* Quick Actions + Top Products */}
-                    <Card className="lg:col-span-2">
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-base">Quick Actions</CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid gap-2">
-                            <Button asChild className="w-full justify-start" variant="outline" size="sm">
-                                <Link href="/warehouse/pos">
-                                    <ShoppingCart className="mr-2 h-4 w-4" /> New POS Sale
-                                </Link>
-                            </Button>
-                            <Button asChild className="w-full justify-start" variant="outline" size="sm">
-                                <Link href="/warehouse/online-orders">
-                                    <Package className="mr-2 h-4 w-4" /> Process Online Orders
-                                </Link>
-                            </Button>
-                            <Button asChild className="w-full justify-start" variant="outline" size="sm">
-                                <Link href="/warehouse/inventory">
-                                    <Activity className="mr-2 h-4 w-4" /> Check Inventory
-                                </Link>
-                            </Button>
-                            <Button asChild className="w-full justify-start" variant="outline" size="sm">
-                                <Link href="/warehouse/deliveries">
-                                    <Truck className="mr-2 h-4 w-4" /> Manage Deliveries
-                                </Link>
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                {/* ── Recent Orders + Top Products ── */}
-                <div className="grid gap-4 lg:grid-cols-7">
-                    {/* Recent Orders */}
-                    <Card className="lg:col-span-4">
-                        <CardHeader>
-                            <CardTitle className="text-base">Recent Orders</CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-0">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Order</TableHead>
-                                        <TableHead>Customer</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead>Channel</TableHead>
-                                        <TableHead className="text-right">Amount</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {recent_orders.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                                                No recent orders found.
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
-                                        recent_orders.map((order) => (
-                                            <TableRow key={order.id}>
-                                                <TableCell className="font-medium text-sm">
-                                                    <div>{order.order_number}</div>
-                                                    <div className="text-xs text-muted-foreground">
-                                                        {new Date(order.created_at).toLocaleString('en-IN', {
-                                                            day: '2-digit', month: 'short',
-                                                            hour: 'numeric', minute: '2-digit', hour12: true,
-                                                        })}
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-sm">
-                                                    {order.customer ? (
-                                                        <div>
-                                                            <div className="font-medium">{order.customer.name}</div>
-                                                            <div className="text-xs text-muted-foreground">{order.customer.phone}</div>
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-muted-foreground text-xs">—</span>
-                                                    )}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline" className={`text-xs ${getStatusColor(order.status)}`}>
-                                                        {order.status}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                                                        order.order_channel === 'online'
-                                                            ? 'bg-cyan-50 text-cyan-700'
-                                                            : 'bg-amber-50 text-amber-700'
-                                                    }`}>
-                                                        {order.order_channel?.toUpperCase() ?? 'POS'}
-                                                    </span>
-                                                </TableCell>
-                                                <TableCell className="text-right text-sm font-medium">
-                                                    {formatCurrency(order.total_amount)}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </CardContent>
-                    </Card>
-
-                    {/* Top Products */}
-                    <Card className="lg:col-span-3">
-                        <CardHeader>
-                            <CardTitle className="text-base">Top Products (This Month)</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                            {top_products.length === 0 ? (
-                                <p className="text-sm text-muted-foreground text-center py-8">No data yet.</p>
+                        <CardContent className="px-2 pb-4">
+                            {loadingChart ? (
+                                <div className="h-57.5 w-full p-2"><Skeleton className="h-full w-full rounded" /></div>
                             ) : (
-                                top_products.map((p, i) => (
-                                    <div key={p.sku} className="space-y-1">
-                                        <div className="flex items-center justify-between text-sm">
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-                                                    {i + 1}
-                                                </span>
-                                                <span className="truncate font-medium">{p.name}</span>
-                                            </div>
-                                            <span className="ml-2 shrink-0 font-semibold">{formatCurrencyShort(p.total_revenue)}</span>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
-                                                <div
-                                                    className="h-full rounded-full bg-primary transition-all"
-                                                    style={{ width: `${(p.total_revenue / maxProductRevenue) * 100}%` }}
-                                                />
-                                            </div>
-                                            <span className="text-xs text-muted-foreground shrink-0">{p.total_qty} units</span>
-                                        </div>
-                                    </div>
-                                ))
+                                <ResponsiveContainer width="100%" height={230}>
+                                    {chartMetric === 'revenue' ? (
+                                        /* Adjusted left margin to 0 and increased width to 65 to prevent half-cut text */
+                                        <AreaChart data={revenue_chart} margin={{ top: 10, right: 15, left: 0, bottom: 10 }}>
+                                            <defs>
+                                                <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%"  stopColor="var(--color-primary, #6366f1)" stopOpacity={0.2} />
+                                                    <stop offset="95%" stopColor="var(--color-primary, #6366f1)" stopOpacity={0} />
+                                                </linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                                            {/* dy added to create an elegant gap between the text labels and the bottom line */}
+                                            <XAxis dataKey="month" className="text-[10px] fill-muted-foreground" tickLine={false} axisLine={false} dy={10} />
+                                            <YAxis tickFormatter={formatCurrencyShort} className="text-[10px] fill-muted-foreground" tickLine={false} axisLine={false} width={65} />
+                                            <Tooltip content={<ChartTooltip />} />
+                                            <Area type="monotone" dataKey="revenue" stroke="var(--color-primary, #6366f1)" strokeWidth={2} fill="url(#revGrad)" dot={{ r: 3, fill: 'var(--color-primary, #6366f1)' }} />
+                                        </AreaChart>
+                                    ) : (
+                                        <AreaChart data={revenue_chart} margin={{ top: 10, right: 15, left: 0, bottom: 10 }}>
+                                            <defs>
+                                                <linearGradient id="onlineGrad" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%"  stopColor="#06b6d4" stopOpacity={0.2} />
+                                                    <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+                                                </linearGradient>
+                                                <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.2} />
+                                                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                                                </linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                                            <XAxis dataKey="month" className="text-[10px] fill-muted-foreground" tickLine={false} axisLine={false} dy={10} />
+                                            <YAxis className="text-[10px] fill-muted-foreground" tickLine={false} axisLine={false} width={50} />
+                                            <Tooltip content={<ChartTooltip />} />
+                                            <Area type="monotone" dataKey="online_orders" stroke="#06b6d4" strokeWidth={2} fill="url(#onlineGrad)" dot={{ r: 3, fill: '#06b6d4' }} />
+                                            <Area type="monotone" dataKey="pos_orders"    stroke="#f59e0b" strokeWidth={2} fill="url(#posGrad)"   dot={{ r: 3, fill: '#f59e0b' }} />
+                                        </AreaChart>
+                                    )}
+                                </ResponsiveContainer>
                             )}
                         </CardContent>
                     </Card>
+
+                    {/* Side Informational Metric Stack - Spans remaining width, matching total graph height */}
+                    <div className="lg:col-span-3 flex flex-col gap-3 justify-between h-full">
+                        {/* Tile 1: Customers */}
+                        <Card className="border border-border p-3.5 flex flex-col justify-between flex-1 min-h-19">
+                            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-muted-foreground leading-none">
+                                <span>New Customers</span>
+                                <Users className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1">
+                                <span className="text-4xl font-bold leading-none">
+                                    {loadingStats ? <Skeleton className="h-6 w-12" /> : (stats?.month_customers ?? 0).toLocaleString()}
+                                </span>
+                                <span className="text-[10px] font-medium text-muted-foreground">
+                                    Today: <b className="text-foreground">{stats?.today_customers ?? 0}</b>
+                                </span>
+                            </div>
+                        </Card>
+
+                        {/* Tile 2: Order Load */}
+                        <Card className="border border-border p-3.5 flex flex-col justify-between flex-1 min-h-19">
+                            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-muted-foreground leading-none">
+                                <span>Total Orders</span>
+                                <Layers className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1">
+                                <span className="text-4xl font-bold leading-none">
+                                    {loadingStats ? <Skeleton className="h-6 w-12" /> : (stats?.month_orders ?? 0).toLocaleString()}
+                                </span>
+                                <span className="text-[10px] font-medium text-muted-foreground">
+                                    Today: <b className="text-foreground">{stats?.today_orders ?? 0}</b>
+                                </span>
+                            </div>
+                        </Card>
+
+                        {/* Tile 3: Growth Ratio */}
+                        <Card className="border border-border p-3.5 flex flex-col justify-between flex-1 min-h-19">
+                            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-muted-foreground leading-none">
+                                <span>Order Growth</span>
+                                <Percent className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1">
+                                <span className={`text-4xl font-bold leading-none ${
+                                    loadingStats
+                                        ? ''
+                                        : (stats?.orders_growth ?? 0) >= 0
+                                            ? 'text-emerald-500'
+                                            : 'text-destructive'
+                                }`}>
+                                    {loadingStats ? <Skeleton className="h-6 w-12" /> : `${stats?.orders_growth ?? 0}%`}
+                                </span>
+                                <span className="text-[10px] font-medium text-muted-foreground flex items-center gap-0.5">
+                                    {!loadingStats && (
+                                        (stats?.orders_growth ?? 0) >= 0
+                                            ? <ArrowUpRight className="h-3 w-3 text-emerald-500" />
+                                            : <ArrowDownRight className="h-3 w-3 text-destructive" />
+                                    )}
+                                    vs Last Month
+                                </span>
+                            </div>
+                        </Card>
+                    </div>
                 </div>
 
-                {/* ── Near Expiry + Low Stock ── */}
-                <div className="grid gap-4 lg:grid-cols-2">
+                {/* Ledger Index Lists Matrix Grid Layout */}
+                <div className="grid gap-4 lg:grid-cols-7">
 
-                    {/* Near Expiry */}
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between pb-2">
-                            <CardTitle className="flex items-center gap-2 text-base">
-                                <Timer className="h-4 w-4 text-orange-500" />
-                                Near Expiry Stock
+                    {/* Recent Orders Register View */}
+                    <Card className="border border-border lg:col-span-4 flex flex-col justify-between">
+                        <div>
+                            <CardHeader className="flex flex-row items-center justify-between pb-3 pt-4 px-4">
+                                <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Recent Orders</CardTitle>
+                                <Link href="/warehouse/online-orders" className="text-xs font-bold text-primary flex items-center gap-1 hover:underline">
+                                    View All <ExternalLink className="h-3 w-3" />
+                                </Link>
+                            </CardHeader>
+                            <div className="p-0 border-t border-border">
+                                {loadingStats ? (
+                                    <div className="p-4 space-y-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>
+                                ) : (
+                                    <Table>
+                                        <TableHeader className="bg-muted/50">
+                                            <TableRow className="border-b border-border hover:bg-transparent">
+                                                <TableHead className="h-9 text-xs font-bold px-4">Order Ref</TableHead>
+                                                <TableHead className="h-9 text-xs font-bold">Customer</TableHead>
+                                                <TableHead className="h-9 text-xs font-bold">Status</TableHead>
+                                                <TableHead className="h-9 text-xs font-bold">Channel</TableHead>
+                                                <TableHead className="h-9 text-xs font-bold text-right px-4">Amount</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {recent_orders.length === 0 ? (
+                                                <TableRow><TableCell colSpan={5} className="h-24 text-center text-xs text-muted-foreground font-medium">No recent orders found.</TableCell></TableRow>
+                                            ) : (
+                                                recent_orders.map((order) => (
+                                                    <TableRow key={order.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                                                        <TableCell className="px-4 py-2">
+                                                            <Link href={`/warehouse/online-orders/${order.id}`} className="font-bold text-xs text-primary hover:underline block">
+                                                                {order.order_number}
+                                                            </Link>
+                                                            <span className="text-[10px] text-muted-foreground block mt-0.5">
+                                                                {new Date(order.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                                            </span>
+                                                        </TableCell>
+                                                        <TableCell className="py-2 text-xs">
+                                                            {order.customer ? (
+                                                                <div className="max-w-30 truncate">
+                                                                    <p className="font-semibold text-foreground truncate leading-tight">{order.customer.name}</p>
+                                                                    <p className="text-[10px] text-muted-foreground truncate">{order.customer.phone}</p>
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-muted-foreground text-xs italic font-medium">Walk-in Customer</span>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="py-2">
+                                                            <Badge variant="outline" className={`text-[10px] font-bold px-1.5 py-0 h-5 rounded ${getStatusColor(order.status)}`}>
+                                                                {order.status}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell className="py-2">
+                                                            <span className={`inline-flex items-center rounded px-1.5 py-0 text-[10px] font-bold h-5 ${
+                                                                order.order_channel === 'online' ? 'bg-cyan-500/10 text-cyan-600 border border-cyan-500/20' : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
+                                                            }`}>
+                                                                {order.order_channel?.toUpperCase() ?? 'POS'}
+                                                            </span>
+                                                        </TableCell>
+                                                        <TableCell className="text-right font-bold text-xs px-4 py-2 text-foreground">{formatCurrency(order.total_amount)}</TableCell>
+                                                    </TableRow>
+                                                ))
+                                            )}
+                                        </TableBody>
+                                    </Table>
+                                )}
+                            </div>
+                        </div>
+                    </Card>
+
+                    {/* Production Grade Re-engineered Top Moving Products Tabular Matrix */}
+                    <Card className="border border-border lg:col-span-3 flex flex-col justify-between">
+                        <div>
+                            <CardHeader className="flex flex-col gap-3 pb-3 pt-4 px-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+                                <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                                    Top Moving Products
+                                </CardTitle>
+
+                                <div className="flex items-center gap-2">
+                                    <Select
+                                        value={filters.top_period}
+                                        onValueChange={(value) => handleTopProductFilters(value, filters.top_metric)}
+                                    >
+                                        <SelectTrigger className="w-full text-xs font-semibold bg-background border-border text-foreground outline-none focus:ring-1 focus:ring-primary">
+                                            <SelectValue placeholder="Select Period" />
+                                        </SelectTrigger>
+                                        <SelectContent className="border-border bg-popover text-popover-foreground">
+                                            <SelectItem value="month" className="text-xs font-medium">This Month</SelectItem>
+                                            <SelectItem value="past_3" className="text-xs font-medium">Past 90 Days</SelectItem>
+                                            <SelectItem value="past_6" className="text-xs font-medium">Past 180 Days</SelectItem>
+                                            <SelectItem value="all" className="text-xs font-medium">All Time</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+
+                                    {/* Metric Mode Toggle */}
+                                    <div className="flex items-center rounded-md border border-border bg-muted p-1">
+                                        <button
+                                            onClick={() => handleTopProductFilters(filters.top_period, 'revenue')}
+                                            className={`rounded px-2.5 py-1 text-xs font-bold transition-all ${
+                                                filters.top_metric === 'revenue'
+                                                    ? 'bg-background text-foreground shadow-sm'
+                                                    : 'text-muted-foreground hover:text-foreground'
+                                            }`}
+                                        >
+                                            Value
+                                        </button>
+                                        <button
+                                            onClick={() => handleTopProductFilters(filters.top_period, 'units')}
+                                            className={`rounded px-2.5 py-1 text-xs font-bold transition-all ${
+                                                filters.top_metric === 'units'
+                                                    ? 'bg-background text-foreground shadow-sm'
+                                                    : 'text-muted-foreground hover:text-foreground'
+                                            }`}
+                                        >
+                                            Units
+                                        </button>
+                                    </div>
+                                </div>
+                            </CardHeader>
+                            <div className="p-0 border-t border-border">
+                                {loadingTopProducts ? (
+                                    <div className="p-4 space-y-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>
+                                ) : top_products.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground text-center py-10">No data available.</p>
+                                ) : (
+                                    <Table>
+                                        <TableHeader className="bg-muted/50">
+                                            <TableRow className="border-b border-border hover:bg-transparent">
+                                                <TableHead className="h-9 text-xs font-bold px-4 w-12.5">Rank</TableHead>
+                                                <TableHead className="h-9 text-xs font-bold">Product Variant</TableHead>
+                                                <TableHead className="h-9 text-xs font-bold text-right px-4">Performance Metrics</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {top_products.map((p, i) => {
+                                                const scaledMetricValue = filters.top_metric === 'units' ? p.total_qty : p.total_revenue;
+                                                return (
+                                                    <TableRow key={p.sku} className="border-b border-border hover:bg-muted/30 transition-colors">
+                                                        <TableCell className="px-4 py-3 font-bold text-xs text-muted-foreground text-center">
+                                                            {i + 1}
+                                                        </TableCell>
+                                                        <TableCell className="py-3">
+                                                            <Link href={`/warehouse/inventory/${p.variant_id}`} className="font-bold text-xs text-primary hover:underline block leading-tight">
+                                                                {p.name}
+                                                            </Link>
+                                                            <span className="text-[10px] font-mono text-muted-foreground block mt-0.5">{p.sku}</span>
+                                                            <div className="h-1 w-24 rounded bg-muted overflow-hidden mt-1.5">
+                                                                <div
+                                                                    className="h-full bg-primary rounded transition-all duration-300"
+                                                                    style={{ width: `${(scaledMetricValue / maxProductBarValue) * 100}%` }}
+                                                                />
+                                                            </div>
+                                                        </TableCell>
+                                                        <TableCell className="text-right px-4 py-3 leading-tight">
+                                                            <p className="font-bold text-foreground text-xs">{formatCurrency(p.total_revenue)}</p>
+                                                            <p className="text-[10px] font-medium text-muted-foreground mt-0.5">{p.total_qty} units sold</p>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })}
+                                        </TableBody>
+                                    </Table>
+                                )}
+                            </div>
+                        </div>
+                    </Card>
+                </div>
+
+                {/* Expiry Lifespan Tracker */}
+                <div className="grid gap-4">
+                    <Card className="border border-border">
+                        <CardHeader className="flex flex-row items-center justify-between pb-3 pt-4 px-4">
+                            <CardTitle className="flex items-center gap-1.5 text-sm font-bold tracking-tight text-foreground">
+                                <Timer className="h-4 w-4 text-orange-500" /> Near Expiry Tracking Register
                             </CardTitle>
-                            {/* Window toggle */}
-                            <div className="flex items-center gap-1 rounded-lg border bg-muted p-1">
+                            <div className="flex items-center border border-border bg-muted p-0.5 rounded-md">
                                 {expiry_windows.map((d) => (
                                     <button
                                         key={d}
                                         onClick={() => handleExpiryWindow(d)}
-                                        className={`rounded-md px-2 py-1 text-xs font-medium transition-all ${
-                                            expiry_days === d ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                                        }`}
+                                        className={`rounded px-2 py-0.5 text-xs font-bold transition-all ${expiry_days === d ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                                     >
-                                        {d}d
+                                        {d}d Window
                                     </button>
                                 ))}
                             </div>
                         </CardHeader>
-                        <CardContent className="p-0">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Product</TableHead>
-                                        <TableHead>Batch</TableHead>
-                                        <TableHead>Qty</TableHead>
-                                        <TableHead>Expires</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {near_expiry_stock.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={4} className="h-20 text-center text-muted-foreground text-sm">
-                                                No batches expiring within {expiry_days} days. ✓
-                                            </TableCell>
+                        <div className="p-0 border-t border-border">
+                            {loadingStats ? (
+                                <div className="p-4 space-y-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>
+                            ) : (
+                                <Table>
+                                    <TableHeader className="bg-muted/50">
+                                        <TableRow className="border-b border-border hover:bg-transparent">
+                                            <TableHead className="h-9 text-xs font-bold px-4">Product Variant Details</TableHead>
+                                            <TableHead className="h-9 text-xs font-bold">Batch ID</TableHead>
+                                            <TableHead className="h-9 text-xs font-bold">Stock Quantity</TableHead>
+                                            <TableHead className="h-9 text-xs font-bold px-4">Days Left</TableHead>
                                         </TableRow>
-                                    ) : (
-                                        near_expiry_stock.map((item) => {
-                                            const daysLeft = getDaysUntilExpiry(item.expiry_date);
-                                            return (
-                                                <TableRow key={item.id}>
-                                                    <TableCell className="text-sm">
-                                                        <div className="font-medium">
-                                                            {item.product_variant?.product?.name ?? '—'}
-                                                        </div>
-                                                        <div className="text-xs text-muted-foreground">
-                                                            {item.product_variant?.sku}
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell className="text-sm text-muted-foreground">
-                                                        {item.batch_no}
-                                                    </TableCell>
-                                                    <TableCell className="text-sm font-medium">
-                                                        {item.available_quantity}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${getExpiryBadge(daysLeft)}`}>
-                                                            {daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`}
-                                                        </span>
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
-                                        })
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </CardContent>
-                    </Card>
-
-                    {/* Low Stock */}
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="flex items-center gap-2 text-base">
-                                <AlertTriangle className="h-4 w-4 text-red-500" />
-                                Low Stock Items
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-0">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Product</TableHead>
-                                        <TableHead className="text-right">Available</TableHead>
-                                        <TableHead className="text-right">Alert At</TableHead>
-                                        <TableHead className="text-right">Deficit</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {low_stock_items.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={4} className="h-20 text-center text-muted-foreground text-sm">
-                                                All stock levels are healthy. ✓
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
-                                        low_stock_items.map((item) => {
-                                            const deficit = (item.stock_alert_qty ?? 0) - (item.available_qty ?? 0);
-                                            return (
-                                                <TableRow key={item.id}>
-                                                    <TableCell className="text-sm">
-                                                        <div className="font-medium">{item.product?.name ?? item.name}</div>
-                                                        <div className="text-xs text-muted-foreground">{item.sku}</div>
-                                                    </TableCell>
-                                                    <TableCell className="text-right text-sm font-semibold text-red-600">
-                                                        {item.available_qty ?? 0}
-                                                    </TableCell>
-                                                    <TableCell className="text-right text-sm text-muted-foreground">
-                                                        {item.stock_alert_qty}
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                                                            -{deficit}
-                                                        </span>
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
-                                        })
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </CardContent>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {near_expiry_stock.length === 0 ? (
+                                            <TableRow><TableCell colSpan={4} className="h-20 text-center text-xs text-muted-foreground font-medium px-4">No batches match expiry warning thresholds within {expiry_days} days.</TableCell></TableRow>
+                                        ) : (
+                                            near_expiry_stock.map((item) => {
+                                                const daysLeft = getDaysUntilExpiry(item.expiry_date);
+                                                return (
+                                                    <TableRow key={item.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                                                        <TableCell className="px-4 py-2">
+                                                            {/* CHANGED FROM item.product_variant_id TO item.product_variant?.id */}
+                                                            <Link href={`/warehouse/inventory/${item.product_variant?.id}`} className="font-bold text-xs text-primary hover:underline block leading-tight">
+                                                                {item.product_variant?.product?.name ?? '—'}
+                                                            </Link>
+                                                            <span className="text-[10px] text-muted-foreground block mt-0.5">{item.product_variant?.sku}</span>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs font-medium text-muted-foreground py-2">{item.batch_no}</TableCell>
+                                                        <TableCell className="text-xs font-bold text-foreground py-2">{item.available_quantity}</TableCell>
+                                                        <TableCell className="px-4 py-2">
+                                                            <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold ${getExpiryBadge(daysLeft)}`}>
+                                                                {daysLeft <= 0 ? 'EXPIRED' : `${daysLeft} DAYS LEFT`}
+                                                            </span>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </div>
                     </Card>
                 </div>
 

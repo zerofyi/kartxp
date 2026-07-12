@@ -8,7 +8,7 @@ import {
     InputGroupInput,
 } from '@/components/ui/input-group';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ScrollArea } from '@/components/special/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import {
     Barcode,
