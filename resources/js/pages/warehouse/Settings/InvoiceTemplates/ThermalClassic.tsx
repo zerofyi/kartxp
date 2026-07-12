@@ -39,13 +39,13 @@ export default function ThermalClassic({ order, warehouse, settings }: InvoicePr
             <div
                 id="invoice-thermal-classic-root"
                 style={{
-                    width: '75mm',
+                    width: '78mm',
                     margin: '0 auto',
                     backgroundColor: '#ffffff',
                     color: '#000000',
                     fontFamily: "'IBM Plex Sans', Arial, sans-serif",
                     fontSize: '11px',
-                    padding: '0px',
+                    padding: '2px 5px',
                     lineHeight: 1.45,
                 }}
             >

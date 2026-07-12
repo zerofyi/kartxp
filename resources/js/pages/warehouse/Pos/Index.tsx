@@ -501,9 +501,9 @@ const POSIndex = ({ products = [], categories = [], warehouse, customers = [], s
                                 await qzService.init();
                                 const config = qz.configs.create(assignedPrinter, { scaleContent: false });
                                 const htmlMarkup = document.getElementById('pos-silent-print-vault')?.innerHTML || '';
-                                const renderWidthInches = invoiceLayout.startsWith('thermal') ? 3.15 : 8.27;
+                                const renderWidthInches = invoiceLayout.startsWith('thermal') ? 3 : 8.27;
                                 await qz.print(config, [{
-                                    type: 'pixel', format: 'html', flavor: 'plain',
+                                    type: 'pixel', format: 'pdf', flavor: 'plain',
                                     data: `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:0;background:#fff;width:100%;}</style></head><body>${htmlMarkup}</body></html>`,
                                     options: { pageWidth: renderWidthInches, density: 300, fallbackDensity: 203 }
                                 }]);
