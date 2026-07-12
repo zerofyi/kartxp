@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::prefix('admin')
-    ->middleware(['auth', 'admin', 'check:admin'])
+    ->middleware(['auth', 'verified', 'check:admin'])
     ->name('admin.')
     ->group(function () {
 

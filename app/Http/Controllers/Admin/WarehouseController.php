@@ -22,7 +22,7 @@ class WarehouseController extends Controller
     // ──────────────────────────────────────────────────────────────
     public function index(Request $request): Response
     {
-        $warehouses = Warehouse::with('user:id,name,email,mobile,status')
+        $warehouses = Warehouse::with('owner:id,name,email,mobile,status')
             ->withCount(['orders', 'warehouseUsers'])
             ->when($request->input('search'), function ($q, $s) {
                 $q->where('name', 'like', "%{$s}%")
