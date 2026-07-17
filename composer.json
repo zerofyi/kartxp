@@ -22,7 +22,7 @@
         "picqer/php-barcode-generator": "^3.2",
         "spatie/laravel-permission": "^6.25",
         "zerofyi/laracontext": "^1.0",
-        "zerofyi/shipit": "^1.2"
+        "zerofyi/shipit": "^2.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.24",

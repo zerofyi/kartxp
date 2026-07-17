@@ -177,7 +177,7 @@ class SalesController extends Controller
             'customer_mobile'                => 'nullable|string|max:20',
             'order_channel'                  => 'required|in:pos,online,manual',
             'warehouse_id'                   => 'required|exists:warehouses,id',
-            'payment_method'                 => 'required|in:cash,upi,card,bank',
+            'payment_method'                 => 'required|in:cash,upi,card,bank,mcard',
             'sale_type'                      => 'required|in:retail,wholesale',
             'items'                          => 'required|array|min:1',
             'items.*.product_variant_id'     => 'required|exists:product_variants,id',
@@ -193,6 +193,15 @@ class SalesController extends Controller
         $warehouse = Auth::user()->ownedWarehouse;
         if (!$warehouse) {
             return redirect()->back()->withErrors(['error' => 'Invalid warehouse selected.']);
+        }
+
+        if ($validated['payment_method'] === 'mcard') {
+            $name = isset($validated['customer_name']) ? trim($validated['customer_name']) : '';
+            $mobile = isset($validated['customer_mobile']) ? trim($validated['customer_mobile']) : '';
+
+            if (empty($name) || strtolower($name) === 'walk-in customer' || empty($mobile)) {
+                return redirect()->back()->withErrors(['error' => 'M-Card payment requires a valid customer name and mobile number.']);
+            }
         }
 
         $variantIds  = array_column($validated['items'], 'product_variant_id');

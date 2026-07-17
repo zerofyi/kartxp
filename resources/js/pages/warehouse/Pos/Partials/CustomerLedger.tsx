@@ -102,6 +102,10 @@ const CustomerLedger = ({
     };
 
     const handleCustomerTypeChange = (val: string) => {
+        if (val === 'walkin' && paymentMethod === 'mcard') {
+            return;
+        }
+
         setCustomerType(val);
         if (val === 'walkin') {
             setCustomerName('Walk-in Customer');
@@ -111,6 +115,18 @@ const CustomerLedger = ({
             setCurrentDueAmount(0);
         } else {
             setCustomerName('');
+        }
+    };
+
+    const handlePaymentMethodChange = (val: string) => {
+        setPaymentMethod(val);
+        if (val === 'mcard' && customerType === 'walkin') {
+            setCustomerType('enter');
+            setCustomerName('');
+            setCustomerMobile('');
+            setCustomerId('');
+            setCurrentCreditLimit(0);
+            setCurrentDueAmount(0);
         }
     };
 
@@ -133,7 +149,12 @@ const CustomerLedger = ({
                             <SelectTrigger className="w-full"><SelectValue placeholder="Customer type" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="enter">Enter customer details</SelectItem>
-                                <SelectItem value="walkin">Walk-in</SelectItem>
+                                <SelectItem
+                                    value="walkin"
+                                    disabled={paymentMethod === 'mcard'}
+                                >
+                                    Walk-in
+                                </SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
@@ -142,21 +163,23 @@ const CustomerLedger = ({
                     <div className="relative w-full" ref={dropRef} onKeyDown={handleKeyDown}>
                         <div className="flex gap-2 w-full">
                             <Input
-                                placeholder="Customer Mobile"
-                                className="w-full"
+                                placeholder={paymentMethod === 'mcard' ? "Customer Mobile (Required)" : "Customer Mobile"}
+                                className={`w-full ${paymentMethod === 'mcard' && !customerMobile ? 'border-primary focus-visible:ring-primary' : ''}`}
                                 value={customerMobile}
                                 onChange={e => handleInputChange('mobile', e.target.value)}
                                 disabled={customerType === 'walkin'}
                                 autoComplete="off"
+                                required={paymentMethod === 'mcard'}
                                 onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
                             />
                             <Input
-                                placeholder="Customer Name"
-                                className="w-full"
+                                placeholder={paymentMethod === 'mcard' ? "Customer Name (Required)" : "Customer Name"}
+                                className={`w-full ${paymentMethod === 'mcard' && !customerName ? 'border-primary focus-visible:ring-primary' : ''}`}
                                 value={customerName}
                                 onChange={e => handleInputChange('name', e.target.value)}
                                 disabled={customerType === 'walkin'}
                                 autoComplete="off"
+                                required={paymentMethod === 'mcard'}
                                 onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
                             />
                         </div>
@@ -223,13 +246,14 @@ const CustomerLedger = ({
                             value={customerId}
                             readOnly
                         />
-                        <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                        <Select value={paymentMethod} onValueChange={handlePaymentMethodChange}>
                             <SelectTrigger className="w-full"><SelectValue placeholder="Payment method" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="cash">Cash</SelectItem>
                                 <SelectItem value="upi">UPI</SelectItem>
                                 <SelectItem value="card">Card</SelectItem>
                                 <SelectItem value="bank">Bank Transfer</SelectItem>
+                                <SelectItem value="mcard">M-Card</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>

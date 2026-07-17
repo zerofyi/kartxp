@@ -62,6 +62,7 @@ Route::middleware(['auth', 'verified', 'check:warehouse'])
     Route::get('/pos/display', [PosController::class, 'index'])->name('warehouse.pos.display');
     // Sales CRUD
     Route::get('/sales', [SalesController::class, 'list'])->name('sales.index');
+    Route::get('/mcard-sales', [PosController::class, 'mcard'])->name('sales.mcard');
     Route::post('/sales', [SalesController::class, 'store'])->name('sales.store');
     Route::get('/sales/{id}', [SalesController::class, 'show'])->name('sales.show');
     Route::get('/sales/{id}/edit', [SalesController::class, 'edit'])->name('sales.edit');

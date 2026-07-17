@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3b93475a0d0235859cf523ad415f7d09",
+    "content-hash": "cc8d30ba3ba210630f09583d0e1387c6",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -8638,16 +8638,16 @@
         },
         {
             "name": "zerofyi/shipit",
-            "version": "v1.2.0",
+            "version": "v2.0.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/zerofyi/shipit.git",
-                "reference": "ec5e51dcfc01bcef44dcba1d7f31b9af1dc78f09"
+                "reference": "587377a9add10cdebef898a42fafc14259b8f69e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/zerofyi/shipit/zipball/ec5e51dcfc01bcef44dcba1d7f31b9af1dc78f09",
-                "reference": "ec5e51dcfc01bcef44dcba1d7f31b9af1dc78f09",
+                "url": "https://api.github.com/repos/zerofyi/shipit/zipball/587377a9add10cdebef898a42fafc14259b8f69e",
+                "reference": "587377a9add10cdebef898a42fafc14259b8f69e",
                 "shasum": ""
             },
             "require": {
@@ -8690,9 +8690,9 @@
             ],
             "support": {
                 "issues": "https://github.com/zerofyi/shipit/issues",
-                "source": "https://github.com/zerofyi/shipit/tree/v1.2.0"
+                "source": "https://github.com/zerofyi/shipit/tree/v2.0.1"
             },
-            "time": "2026-06-10T21:39:38+00:00"
+            "time": "2026-07-16T23:45:36+00:00"
         }
     ],
     "packages-dev": [

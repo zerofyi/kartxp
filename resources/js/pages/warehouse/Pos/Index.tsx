@@ -436,7 +436,26 @@ const POSIndex = ({ products = [], categories = [], warehouse, customers = [], s
     // ── Silent Queue Checkout Engine ─────────────────────────────────────────
     const quickPay = useCallback(async () => {
         if (invoiceItems.length === 0) { toast.error('Cart is empty!'); return; }
-        if (!warehouse)                { toast.error('No warehouse assigned!'); return; }
+        if (!warehouse) { toast.error('No warehouse assigned!'); return; }
+
+        if (paymentMethod === 'mcard') {
+            if (customerType === 'walkin') {
+                toast.error('M-Card payment is not allowed for Walk-in customers.', {
+                    description: 'Please switch the customer type to details entry.'
+                });
+                return;
+            }
+
+            const cleanName = customerName?.trim();
+            const cleanMobile = customerMobile?.trim();
+
+            if (!cleanName || !cleanMobile) {
+                toast.error('Customer details required for M-Card', {
+                    description: 'Please enter a valid customer name and mobile number to proceed.'
+                });
+                return;
+            }
+        }
 
         const ok = await confirm({
             title: `Process ₹${totals.totalBill.toFixed(2)} payment?`,

@@ -101,6 +101,11 @@ const salesNavItems: NavItem[] = [
         href: warehouse.sales.index().url,
         icon: ReceiptText,
     },
+    {
+        title: 'M-Card Sales',
+        href: warehouse.sales.mcard().url,
+        icon: ReceiptText,
+    },
 ];
 
 const ecommerceNavItems: NavItem[] = [
