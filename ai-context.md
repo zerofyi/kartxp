@@ -1,5 +1,5 @@
 # Application Context Blueprint
-Generated: 2026-07-08 22:25:40
+Generated: 2026-08-29 11:53:07
 Framework: Laravel v13.18.1
 Environment: PHP v8.5.8
 --------------------------------------------------
@@ -10,263 +10,263 @@ Use this schema map, endpoint list, and relationships to understand context befo
 
 ### Model: `Account`
 - **Table:** `accounts`
-- **Columns:** `id` (bigint), `name` (varchar), `type` (enum), `is_active` (tinyint)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `journalLines()` [hasMany]
 
 ### Model: `Address`
 - **Table:** `addresses`
-- **Columns:** `id` (bigint), `user_id` (bigint), `customer_id` (bigint), `label` (varchar), `name` (varchar), `phone` (varchar), `line1` (varchar), `line2` (varchar), `city` (varchar), `state` (varchar), `pincode` (varchar), `country` (varchar), `lat` (decimal), `lng` (decimal), `is_default` (tinyint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `user()` [belongsTo], `customer()` [belongsTo]
 
 ### Model: `Attribute`
 - **Table:** `attributes`
-- **Columns:** `id` (bigint), `name` (varchar)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `values()` [hasMany]
 
 ### Model: `AttributeValue`
 - **Table:** `attribute_values`
-- **Columns:** `id` (bigint), `attribute_id` (bigint), `value` (varchar)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `attribute()` [belongsTo], `productVariants()` [belongsTo]
 
 ### Model: `Banner`
 - **Table:** `banners`
-- **Columns:** `id` (bigint), `warehouse_id` (bigint), `title` (varchar), `image_path` (varchar), `link_type` (enum), `link_value` (varchar), `position` (enum), `sort_order` (int), `is_active` (tinyint), `starts_at` (timestamp), `ends_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 
 ### Model: `Barcode`
 - **Table:** `barcodes`
-- **Columns:** `id` (bigint), `product_variant_id` (bigint), `barcode` (varchar), `is_primary` (tinyint)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `productVariant()` [belongsTo]
 
 ### Model: `BarcodePrintJob`
 - **Table:** `barcode_print_jobs`
-- **Columns:** `id` (bigint), `warehouse_id` (bigint), `product_variant_id` (bigint), `quantity` (int), `template` (varchar), `status` (enum), `created_by` (bigint), `printed_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `warehouse()` [belongsTo], `variant()` [belongsTo], `createdBy()` [belongsTo]
 
 ### Model: `Brand`
 - **Table:** `brands`
-- **Columns:** `id` (bigint), `name` (varchar), `slug` (varchar), `description` (text), `logo_path` (varchar), `is_active` (tinyint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `products()` [hasMany]
 
 ### Model: `Cart`
 - **Table:** `carts`
-- **Columns:** `id` (bigint), `user_id` (bigint), `session_id` (varchar), `warehouse_id` (bigint), `expires_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `items()` [hasMany], `warehouse()` [belongsTo], `user()` [belongsTo]
 
 ### Model: `CartItem`
 - **Table:** `cart_items`
-- **Columns:** `id` (bigint), `cart_id` (bigint), `product_variant_id` (bigint), `quantity` (int), `unit_price` (decimal), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `cart()` [belongsTo], `variant()` [belongsTo]
 
 ### Model: `Category`
 - **Table:** `categories`
-- **Columns:** `id` (bigint), `name` (varchar), `slug` (varchar), `image_path` (varchar), `icon_path` (varchar), `warehouse_id` (bigint), `parent_id` (bigint), `sort_order` (int), `status` (tinyint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `parent()` [belongsTo], `children()` [hasMany], `warehouse()` [belongsTo], `products()` [hasMany]
 
 ### Model: `Coupon`
 - **Table:** `coupons`
-- **Columns:** `id` (bigint), `warehouse_id` (bigint), `code` (varchar), `name` (varchar), `type` (enum), `value` (decimal), `min_order_amount` (decimal), `max_discount` (decimal), `usage_limit` (int), `used_count` (int), `per_user_limit` (int), `applicable_to` (enum), `applicable_ids` (longtext), `starts_at` (timestamp), `ends_at` (timestamp), `is_active` (tinyint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `usages()` [hasMany]
 
 ### Model: `CouponUsage`
 - **Table:** `coupon_usages`
-- **Columns:** `id` (bigint), `coupon_id` (bigint), `user_id` (bigint), `order_id` (bigint), `discount_given` (decimal), `used_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `coupon()` [belongsTo], `user()` [belongsTo], `order()` [belongsTo]
 
 ### Model: `Customer`
 - **Table:** `customers`
-- **Columns:** `id` (bigint), `name` (varchar), `phone` (varchar), `email` (varchar), `address` (text), `loyalty_points` (int), `total_spent` (decimal), `is_verified` (tinyint), `user_id` (bigint), `credit_limit` (decimal), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `user()` [belongsTo], `addresses()` [hasMany], `loyaltyTransactions()` [hasMany], `orders()` [hasMany], `payments()` [hasMany], `returns()` [hasMany]
 
 ### Model: `DailySalesSummary`
 - **Table:** `daily_sales_summaries`
-- **Columns:** `date` (date), `warehouse_id` (bigint), `total_sales` (decimal), `total_orders` (int), `total_tax` (decimal)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `warehouse()` [belongsTo]
 
 ### Model: `Delivery`
 - **Table:** `deliveries`
-- **Columns:** `id` (bigint), `order_id` (bigint), `agent_id` (bigint), `status` (enum), `assigned_at` (timestamp), `picked_at` (timestamp), `delivered_at` (timestamp), `proof_image` (varchar), `signature_path` (varchar), `notes` (text), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `order()` [belongsTo], `agent()` [belongsTo], `attempts()` [hasMany]
 
 ### Model: `DeliveryAttempt`
 - **Table:** `delivery_attempts`
-- **Columns:** `id` (bigint), `delivery_id` (bigint), `attempted_at` (timestamp), `reason` (varchar), `lat` (decimal), `lng` (decimal), `photo` (varchar), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `delivery()` [belongsTo]
 
 ### Model: `Expense`
 - **Table:** `expenses`
-- **Columns:** `id` (bigint), `warehouse_id` (bigint), `category` (varchar), `amount` (decimal), `note` (text), `attachment_path` (varchar), `expense_date` (date), `created_by` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `warehouse()` [belongsTo], `createdBy()` [belongsTo]
 
 ### Model: `JournalEntry`
 - **Table:** `journal_entries`
-- **Columns:** `id` (bigint), `user_id` (bigint), `date` (date), `reference_type` (varchar), `reference_id` (bigint), `description` (text), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `lines()` [hasMany], `user()` [belongsTo]
 
 ### Model: `JournalLine`
 - **Table:** `journal_lines`
-- **Columns:** `id` (bigint), `journal_entry_id` (bigint), `account_id` (bigint), `debit` (decimal), `credit` (decimal), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `journalEntry()` [belongsTo], `account()` [belongsTo]
 
 ### Model: `LoyaltyTransaction`
 - **Table:** `loyalty_transactions`
-- **Columns:** `id` (bigint), `customer_id` (bigint), `order_id` (bigint), `type` (enum), `points` (int), `balance_after` (int), `note` (varchar), `created_by` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `customer()` [belongsTo], `order()` [belongsTo], `createdBy()` [belongsTo]
 
 ### Model: `Order`
 - **Table:** `orders`
-- **Columns:** `id` (bigint), `order_number` (varchar), `order_channel` (enum), `warehouse_id` (bigint), `customer_id` (bigint), `status` (enum), `payment_status` (enum), `payment_method` (varchar), `address_id` (bigint), `address_snapshot` (longtext), `coupon_id` (bigint), `coupon_discount` (decimal), `shipping_charge` (decimal), `assigned_agent_id` (bigint), `delivered_at` (timestamp), `cancelled_at` (timestamp), `notes` (text), `cancellation_reason` (text), `subtotal` (decimal), `tax_amount` (decimal), `discount_amount` (decimal), `total_amount` (decimal), `created_by` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `customer()` [belongsTo], `warehouse()` [belongsTo], `address()` [belongsTo], `coupon()` [belongsTo], `agent()` [belongsTo], `createdBy()` [belongsTo], `items()` [hasMany], `payments()` [hasMany], `statusLogs()` [hasMany], `delivery()` [hasOne], `couponUsage()` [hasOne]
 
 ### Model: `OrderItem`
 - **Table:** `order_items`
-- **Columns:** `id` (bigint), `order_id` (bigint), `product_variant_id` (bigint), `quantity` (int), `price` (decimal), `discount` (decimal), `tax_percent` (decimal), `product_snapshot` (longtext), `total` (decimal), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `order()` [belongsTo], `productVariant()` [belongsTo]
 
 ### Model: `OrderStatusLog`
 - **Table:** `order_status_logs`
-- **Columns:** `id` (bigint), `order_id` (bigint), `from_status` (varchar), `to_status` (varchar), `note` (text), `changed_by` (bigint), `created_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `order()` [belongsTo], `changedBy()` [belongsTo]
 
 ### Model: `OtpVerification`
 - **Table:** `otp_verifications`
-- **Columns:** `id` (bigint), `identifier` (varchar), `otp` (varchar), `type` (enum), `expires_at` (timestamp), `verified_at` (timestamp), `attempts` (tinyint), `sent_at` (timestamp), `ip_address` (varchar), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 
 ### Model: `Payment`
 - **Table:** `payments`
-- **Columns:** `id` (bigint), `order_id` (bigint), `customer_id` (bigint), `vendor_id` (bigint), `amount` (decimal), `method` (enum), `type` (enum), `reference_no` (varchar), `gateway` (varchar), `transaction_id` (varchar), `status` (enum), `payload` (longtext), `gateway_order_id` (varchar), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `order()` [belongsTo], `customer()` [belongsTo], `vendor()` [belongsTo]
 
 ### Model: `PriceHistory`
 - **Table:** `price_histories`
-- **Columns:** `id` (bigint), `product_variant_id` (bigint), `mrp` (decimal), `selling_price` (decimal), `cost_price` (decimal), `effective_from` (date), `created_by` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `productVariant()` [belongsTo], `creator()` [belongsTo]
 
 ### Model: `Product`
 - **Table:** `products`
-- **Columns:** `id` (bigint), `name` (varchar), `slug` (varchar), `product_code` (varchar), `description` (text), `short_description` (text), `category_id` (bigint), `brand_id` (bigint), `tax_category_id` (bigint), `is_active` (tinyint), `is_returnable` (tinyint), `is_featured` (tinyint), `is_trending` (tinyint), `is_best_seller` (tinyint), `warehouse_id` (bigint), `meta_title` (varchar), `meta_description` (text), `deleted_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `category()` [belongsTo], `brand()` [belongsTo], `taxCategory()` [belongsTo], `warehouse()` [belongsTo], `variants()` [hasMany], `images()` [hasMany], `reviews()` [hasMany]
 
 ### Model: `ProductImage`
 - **Table:** `product_images`
-- **Columns:** `id` (bigint), `product_id` (bigint), `product_variant_id` (bigint), `image_path` (varchar), `is_primary` (tinyint), `sort_order` (int)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `product()` [belongsTo], `variant()` [belongsTo]
 
 ### Model: `ProductSalesSummary`
 - **Table:** `product_sales_summaries`
-- **Columns:** `product_variant_id` (bigint), `total_quantity_sold` (int), `total_revenue` (decimal)
+- **Columns:** (Database connection unavailable or unmigrated table)
 
 ### Model: `ProductVariant`
 - **Table:** `product_variants`
-- **Columns:** `id` (bigint), `product_id` (bigint), `variant_name` (varchar), `sku` (varchar), `unit_id` (bigint), `net_quantity` (decimal), `mrp` (decimal), `selling_price` (decimal), `cost_price` (decimal), `min_selling_price` (decimal), `status` (tinyint), `stock_alert_qty` (int), `compare_price` (decimal), `weight` (decimal), `deleted_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `product()` [belongsTo], `unit()` [belongsTo], `stockSnapshot()` [hasOne], `stockSnapshots()` [hasMany], `barcodes()` [hasMany], `priceHistories()` [hasMany], `images()` [hasMany], `primaryImage()` [hasOne], `attributeValues()` [belongsTo], `cartItems()` [hasMany], `wishlists()` [hasMany]
 
 ### Model: `ProductVariantAttribute`
 - **Table:** `product_variant_attributes`
-- **Columns:** `product_variant_id` (bigint), `attribute_value_id` (bigint)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `productVariant()` [belongsTo], `attributeValue()` [belongsTo]
 
 ### Model: `Purchase`
 - **Table:** `purchases`
-- **Columns:** `id` (bigint), `vendor_id` (bigint), `warehouse_id` (bigint), `invoice_no` (varchar), `image_path` (varchar), `purchase_date` (date), `subtotal` (decimal), `tax_amount` (decimal), `total_amount` (decimal), `status` (enum), `notes` (text), `discount_amount` (decimal), `created_by` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `vendor()` [belongsTo], `warehouse()` [belongsTo], `items()` [hasMany], `createdBy()` [belongsTo]
 
 ### Model: `PurchaseItem`
 - **Table:** `purchase_items`
-- **Columns:** `id` (bigint), `purchase_id` (bigint), `product_variant_id` (bigint), `quantity` (int), `cost_price` (decimal), `min_selling_price` (decimal), `selling_price` (decimal), `mrp` (decimal), `tax_id` (bigint), `batch_no` (varchar), `expiry_date` (date), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `purchase()` [belongsTo], `productVariant()` [belongsTo], `stockBatches()` [hasMany], `products()` [hasMany], `taxCategory()` [belongsTo]
 
 ### Model: `ReturnItem`
 - **Table:** `return_items`
-- **Columns:** `id` (bigint), `return_id` (bigint), `order_item_id` (bigint), `quantity` (int), `condition` (enum), `restock` (tinyint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `returnRequest()` [belongsTo], `orderItem()` [belongsTo]
 
 ### Model: `ReturnRequest`
 - **Table:** `returns`
-- **Columns:** `id` (bigint), `order_id` (bigint), `customer_id` (bigint), `reason` (text), `status` (enum), `refund_amount` (decimal), `refund_method` (varchar), `refund_reference` (varchar), `images` (longtext), `note` (text), `processed_by` (bigint), `processed_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `order()` [belongsTo], `customer()` [belongsTo], `processedBy()` [belongsTo], `items()` [hasMany]
 
 ### Model: `Review`
 - **Table:** `reviews`
-- **Columns:** `id` (bigint), `product_id` (bigint), `user_id` (bigint), `order_item_id` (bigint), `rating` (tinyint), `title` (varchar), `body` (text), `images` (longtext), `is_verified_purchase` (tinyint), `is_approved` (tinyint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `product()` [belongsTo], `user()` [belongsTo], `orderItem()` [belongsTo]
 
 ### Model: `Setting`
 - **Table:** `settings`
-- **Columns:** `id` (bigint), `key` (varchar), `value` (text), `warehouse_id` (bigint), `group` (varchar), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 
 ### Model: `ShippingZone`
 - **Table:** `shipping_zones`
-- **Columns:** `id` (bigint), `warehouse_id` (bigint), `name` (varchar), `pincodes` (longtext), `radius_km` (decimal), `charge` (decimal), `free_above` (decimal), `is_active` (tinyint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `warehouse()` [belongsTo]
 
 ### Model: `StockAdjustment`
 - **Table:** `stock_adjustments`
-- **Columns:** `id` (bigint), `warehouse_id` (bigint), `reason` (varchar), `created_by` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `warehouse()` [belongsTo], `creator()` [belongsTo], `items()` [hasMany]
 
 ### Model: `StockAdjustmentItem`
 - **Table:** `stock_adjustment_items`
-- **Columns:** `id` (bigint), `stock_adjustment_id` (bigint), `product_variant_id` (bigint), `batch_id` (bigint), `quantity` (int), `adjustment_type` (enum), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `stockAdjustment()` [belongsTo], `productVariant()` [belongsTo], `batch()` [belongsTo]
 
 ### Model: `StockBatch`
 - **Table:** `stock_batches`
-- **Columns:** `id` (bigint), `product_variant_id` (bigint), `warehouse_id` (bigint), `batch_no` (varchar), `expiry_date` (date), `purchase_item_id` (bigint), `received_quantity` (int), `available_quantity` (int), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `productVariant()` [belongsTo], `warehouse()` [belongsTo], `purchaseItem()` [belongsTo]
 
 ### Model: `StockLedger`
 - **Table:** `stock_ledgers`
-- **Columns:** `id` (bigint), `product_variant_id` (bigint), `warehouse_id` (bigint), `batch_id` (bigint), `movement_type` (enum), `quantity` (int), `source_type` (varchar), `source_id` (bigint), `remarks` (text), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `productVariant()` [belongsTo], `warehouse()` [belongsTo], `batch()` [belongsTo], `source()` [morphTo]
 
 ### Model: `StockReservation`
 - **Table:** `stock_reservations`
-- **Columns:** `id` (bigint), `product_variant_id` (bigint), `warehouse_id` (bigint), `order_id` (bigint), `quantity` (int), `status` (enum), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `productVariant()` [belongsTo], `warehouse()` [belongsTo], `order()` [belongsTo]
 
 ### Model: `StockSnapshot`
 - **Table:** `stock_snapshots`
-- **Columns:** `id` (bigint), `product_variant_id` (bigint), `warehouse_id` (bigint), `available_quantity` (int), `reserved_quantity` (int), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `productVariant()` [belongsTo], `warehouse()` [belongsTo]
 
 ### Model: `TaxCategory`
 - **Table:** `tax_categories`
-- **Columns:** `id` (bigint), `name` (varchar), `tax_percent` (decimal), `type` (enum), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `products()` [hasMany]
 
 ### Model: `Unit`
 - **Table:** `units`
-- **Columns:** `id` (bigint), `name` (varchar), `symbol` (varchar), `base_unit_id` (bigint), `multiplier` (decimal), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `baseUnit()` [belongsTo], `subUnits()` [hasMany], `products()` [hasMany]
 
 ### Model: `User`
 - **Table:** `users`
-- **Columns:** `id` (bigint), `name` (varchar), `avatar` (varchar), `email` (varchar), `mobile` (varchar), `role` (enum), `status` (enum), `email_verified_at` (timestamp), `phone_verified_at` (timestamp), `password` (varchar), `two_factor_secret` (text), `two_factor_recovery_codes` (text), `two_factor_confirmed_at` (timestamp), `parent_id` (bigint), `last_login_at` (timestamp), `remember_token` (varchar), `deleted_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
-- **Relationships:** `ownedWarehouse()` [hasOne], `devices()` [hasMany], `warehouseUsers()` [hasMany], `warehouses()` [belongsTo], `customer()` [hasOne], `addresses()` [hasMany], `notifications()` [morphMany], `tokens()` [morphMany], `roles()` [morphTo], `permissions()` [morphTo]
+- **Columns:** (Database connection unavailable or unmigrated table)
+- **Relationships:** `ownedWarehouse()` [hasOne], `staffWarehouses()` [belongsTo], `deliveries()` [hasMany], `devices()` [hasMany], `customer()` [hasOne], `addresses()` [hasMany], `warehouseUsers()` [hasMany], `notifications()` [morphMany], `tokens()` [morphMany], `roles()` [morphTo], `permissions()` [morphTo]
 
 ### Model: `UserDevice`
 - **Table:** `user_devices`
-- **Columns:** `id` (bigint), `user_id` (bigint), `device_id` (varchar), `device_name` (varchar), `fcm_token` (text), `lat` (decimal), `lng` (decimal), `platform` (varchar), `app_version` (varchar), `last_active_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `user()` [belongsTo]
 
 ### Model: `Vendor`
 - **Table:** `vendors`
-- **Columns:** `id` (bigint), `name` (varchar), `phone` (varchar), `email` (varchar), `gstin` (varchar), `address` (text), `user_id` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `user()` [belongsTo]
 
 ### Model: `Warehouse`
 - **Table:** `warehouses`
-- **Columns:** `id` (bigint), `name` (varchar), `platform` (enum), `address` (text), `location` (varchar), `phone` (varchar), `email` (varchar), `logo_path` (varchar), `is_active` (tinyint), `gstin` (varchar), `lat` (decimal), `lng` (decimal), `timezone` (varchar), `currency` (varchar), `user_id` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
-- **Relationships:** `ownerUser()` [belongsTo], `warehouseUsers()` [hasMany], `users()` [belongsTo], `stockBatches()` [hasMany], `stockLedgers()` [hasMany], `stockSnapshots()` [hasMany], `orders()` [hasMany], `products()` [hasMany], `expenses()` [hasMany], `shippingZones()` [hasMany], `settings()` [hasMany]
+- **Columns:** (Database connection unavailable or unmigrated table)
+- **Relationships:** `owner()` [belongsTo], `employees()` [belongsTo], `stockBatches()` [hasMany], `stockLedgers()` [hasMany], `stockSnapshots()` [hasMany], `orders()` [hasMany], `products()` [hasMany], `expenses()` [hasMany], `shippingZones()` [hasMany], `settings()` [hasMany], `warehouseUsers()` [hasMany]
 
 ### Model: `WarehouseUser`
 - **Table:** `warehouse_users`
-- **Columns:** `id` (bigint), `warehouse_id` (bigint), `user_id` (bigint), `role` (enum), `is_active` (tinyint), `joined_at` (timestamp), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `warehouse()` [belongsTo], `user()` [belongsTo], `deliveries()` [hasMany]
 
 ### Model: `Wishlist`
 - **Table:** `wishlists`
-- **Columns:** `id` (bigint), `user_id` (bigint), `product_variant_id` (bigint), `created_at` (timestamp), `updated_at` (timestamp)
+- **Columns:** (Database connection unavailable or unmigrated table)
 - **Relationships:** `user()` [belongsTo], `variant()` [belongsTo]
 
 ## 2. API & Application Routing
@@ -369,8 +369,10 @@ Use this schema map, endpoint list, and relationships to understand context befo
 | PUT | `/api/v1/agent/deliveries/location` | `DeliveryController@updateLocation` | None |
 | GET | `/api/{fallbackPlaceholder}` | *Closure* | None |
 | GET | `/up` | *Closure* | None |
-| GET | `//` | `AppController@index` | None |
+| GET | `//` | *Closure* | None |
 | GET | `/soon` | *Closure* | None |
+| GET | `/api/qz/certificate` | `PrintSigningController@getCertificate` | None |
+| POST | `/api/qz/sign` | `PrintSigningController@signMessage` | None |
 | POST | `/signin` | `AuthController@signin` | None |
 | GET | `/dashboard` | *Closure* | None |
 | GET | `/admin` | `DashboardController@index` | None |
@@ -476,6 +478,7 @@ Use this schema map, endpoint list, and relationships to understand context befo
 | GET | `/warehouse/pos` | `SalesController@index` | None |
 | GET | `/warehouse/pos/display` | `PosController@index` | None |
 | GET | `/warehouse/sales` | `SalesController@list` | None |
+| GET | `/warehouse/mcard-sales` | `PosController@mcard` | None |
 | POST | `/warehouse/sales` | `SalesController@store` | None |
 | GET | `/warehouse/sales/{id}` | `SalesController@show` | None |
 | GET | `/warehouse/sales/{id}/edit` | `SalesController@edit` | None |
@@ -541,6 +544,7 @@ Use this schema map, endpoint list, and relationships to understand context befo
 | GET | `/warehouse/analytics-engine/financials/profit-loss` | `AnalyticsEngineController@profitLoss` | None |
 | GET | `/warehouse/analytics-engine/financials/tax-ledger` | `AnalyticsEngineController@taxLedger` | None |
 | POST | `/warehouse/maintenance/pos/clear-cache` | `PosController@flushCache` | None |
+| POST | `/warehouse/maintenance/dashboard/clear-cache` | `DashboardController@clearCache` | None |
 | GET | `/warehouse/maintenance/migrate-product-images` | *Closure* | None |
 | GET|POST|PUT|PATCH|DELETE|OPTIONS | `/settings` | `RedirectController` | None |
 | GET | `/settings/profile` | `ProfileController@edit` | None |
@@ -570,231 +574,3 @@ Use this schema map, endpoint list, and relationships to understand context befo
 | POST | `/customer/profile/address` | `ProfileController@storeAddress` | None |
 | GET | `/storage/{path}` | *Closure* | None |
 | PUT | `/storage/{path}` | *Closure* | None |
-
-# Core Services Framework
-
-## Infrastructure Service: ImageStorageService
-
-**Namespace:** `App\Services\ImageStorage\ImageStorageService`
-
-**Engine:** Intervention Image **v4.1.5** (Imagick Driver)
-
-### Purpose
-
-Central image service for all uploads across the application.
-
-Responsibilities:
-
-- Secure upload validation
-- Automatic raster → WebP conversion
-- SVG preservation
-- Thumbnail generation
-- Atomic file replacement
-- URL resolution
-- File deletion
-- Legacy storage migration
-- Laravel filesystem disk abstraction
-
----
-
-# Storage Rules
-
-## Folder Naming
-
-Always use **Pascal Case** folders.
-
-✅ Examples
-
-```text
-Warehouses/Logo
-Products/Variants
-Category/Images
-Brands/Logo
-```
-
-Never use lowercase or camelCase.
-
----
-
-# Image Processing
-
-- Shared `ImageManager` (Imagick)
-- Raster images → WebP
-- SVG remains unchanged
-- Master quality: **85**
-- Thumbnail quality: **75**
-- Thumbnail size: **200×200** using `scaleDown()`
-- Thumbnail path:
-
-```text
-Thumbnails/{OriginalFolder}/{filename}
-```
-
----
-
-# Security
-
-Every upload performs:
-
-- MIME allowlist validation (caller may further restrict)
-- Double-extension detection (`file.php.jpg`)
-- Raster magic-byte validation
-- Path traversal protection
-- Max file size validation
-- ULID filename generation
-
-Filename format:
-
-```text
-{slug}_{ulid}.{extension}
-```
-
----
-
-# Public API
-
-## upload()
-
-```php
-upload(
-    UploadedFile $file,
-    string $slug,
-    string $folder,
-    ?int $maxSizeKb = null,
-    ?string $disk = null,
-    ?array $allowedTypes = null,
-    bool $generateThumb = false
-): StoredImageResult
-```
-
-Performs validation, security checks, WebP conversion (SVG preserved), storage, optional thumbnail generation, and returns `StoredImageResult`.
-
----
-
-## replace()
-
-```php
-replace(...)
-```
-
-- Uploads new image
-- Deletes old asset **only after successful upload**
-- Regenerates thumbnail if enabled
-
----
-
-## delete()
-
-```php
-delete(string $path, ?string $disk = null): bool
-```
-
-- Deletes master image
-- Deletes matching thumbnail
-- Returns `false` if file is missing
-- Never throws for missing files
-
----
-
-## url()
-
-```php
-url(?string $path, ?string $disk = null): ?string
-```
-
-Returns the public asset URL.
-
----
-
-## thumbnailUrl()
-
-```php
-thumbnailUrl(?string $path, ?string $disk = null): ?string
-```
-
-Returns thumbnail URL or falls back to the master image.
-
----
-
-## migrateAndBuildThumbnail()
-
-```php
-migrateAndBuildThumbnail(
-    string $oldRelativePath,
-    string $targetBaseFolder,
-    ?string $disk = null
-): ?string
-```
-
-- Flattens legacy folder structures
-- Converts raster → WebP
-- Preserves SVG
-- Generates thumbnail
-- Removes empty legacy folders
-- Returns new relative path or `null`
-
----
-
-# Internal Methods
-
-Implementation-only helpers (never call directly):
-
-```text
-validate()
-assertMimeAllowed()
-assertNoDoubleExtension()
-assertFileSize()
-assertMagicBytes()
-storeAsWebp()
-generateThumbnailOnDisk()
-resolveAllowedTypes()
-sanitizeFolder()
-buildFilename()
-mimeToExtension()
-```
-
----
-
-# StoredImageResult
-
-Successful uploads return:
-
-```php
-path
-url
-filename
-size
-mime
-disk
-```
-
-Always save **`$result->path`** to the database, **never** `$result->url`.
-
----
-
-# Usage
-
-```php
-// Upload
-$result = $this->imageStorage->upload(...);
-
-// Replace
-$result = $this->imageStorage->replace(...);
-
-// Delete
-$this->imageStorage->delete($path);
-
-// URL
-$this->imageStorage->url($path);
-
-// Thumbnail
-$this->imageStorage->thumbnailUrl($path);
-
-// Legacy migration
-$this->imageStorage->migrateAndBuildThumbnail(...);
-```
-
----
-
-# Project Notes
-- Uses **PWA (Progressive Web App)** with installable support, offline caching, service worker, and web app manifest.

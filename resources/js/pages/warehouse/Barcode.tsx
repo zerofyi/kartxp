@@ -139,6 +139,7 @@ export default function BarcodeSetupConsolePage({ variant, stock }: Props) {
                                     <SelectItem value="50x30">50mm x 30mm (Medium Layout Size)</SelectItem>
                                     <SelectItem value="60x40">60mm x 40mm (Large Asset Sticker)</SelectItem>
                                     <SelectItem value="30x20">30mm x 20mm (Small Component Size)</SelectItem>
+                                    <SelectItem value="110x30_2up">110x30mm (2-Up 50x30 Dual Roll)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </Card>
@@ -154,7 +155,7 @@ export default function BarcodeSetupConsolePage({ variant, stock }: Props) {
                         </Card>
 
                         {/* Real-time Summary Checkouts Panel */}
-                        <Card className="bg-gradient-to-br from-emerald-800 to-teal-900 border-0 p-5 text-white space-y-3 font-mono text-xs">
+                        <Card className="bg-linear-to-br from-emerald-800 to-teal-900 border-0 p-5 text-white space-y-3 font-mono text-xs">
                             <div className="text-xs uppercase font-sans font-bold tracking-wider text-emerald-200">Execution Output Summary</div>
                             <div className="flex justify-between border-b border-white/10 pb-1.5"><span>Target Barcode Signature:</span><span className="font-bold text-sm text-emerald-100">{selectedBarcode || 'None Selected'}</span></div>
                             <div className="flex justify-between border-b border-white/10 pb-1.5"><span>Base Unique Items:</span><span>{source === 'stock' ? stock : manualQty} items</span></div>

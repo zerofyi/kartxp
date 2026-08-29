@@ -248,7 +248,7 @@ class InventoryController extends Controller
             'barcode'   => 'required|string',
             'qty'       => 'required|integer|min:1',
             'copies'    => 'required|integer|min:1|max:100',
-            'size'      => 'required|string|in:40x30,50x30,60x40,30x20',
+            'size'      => 'required|string|in:40x30,50x30,60x40,30x20,110x30_2up',
             'showName'  => 'required|boolean',
             'showPrice' => 'required|boolean',
             'showSku'   => 'required|boolean',
