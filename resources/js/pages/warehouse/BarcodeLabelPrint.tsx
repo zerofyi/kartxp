@@ -51,7 +51,7 @@ export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, co
         '50x30': { w: '50mm', h: '30mm', pad: '2.5mm', font: '10px' },
         '60x40': { w: '60mm', h: '40mm', pad: '3mm', font: '11px' },
         '30x20': { w: '30mm', h: '20mm', pad: '1.5mm', font: '8px' },
-        '110x30_2up': { w: '104mm', h: '30mm', pad: '0', font: '10px', innerW: '50mm' },
+        '110x30_2up': { w: '104mm', h: '30mm', pad: '2mm', font: '10px', innerW: '50mm' },
     };
     const currentSize = sizeMap[size] || sizeMap['40x30'];
 
