@@ -5,18 +5,79 @@ import JsBarcode from 'jsbarcode';
 interface ProductVariant { id: number; variant_name: string; sku: string; selling_price: number; mrp: number; product: { name: string; }; }
 interface Props { variant: ProductVariant; barcode: string; qty: number; copies: number; size: string; showName: boolean; showPrice: boolean; showSku: boolean; showMRP: boolean; }
 
+// Font & barcode size map — tuned by matching the BarTender 50x30 2-up label photo.
+// Key hierarchy from photo: Price is dominant (largest), Name is bold+large,
+// Warranty/subtitle is medium bold, SKU/MRP are small regular.
+// fontWeight 800 used instead of 'bold' for better thermal ink density.
+const fontMap: Record<string, {
+    nameSize: string;
+    subtitleSize: string;
+    priceSize: string;
+    skuMrpSize: string;
+    barcodeTextSize: number;
+    barcodeHeight: number;
+    barcodeWidth: number;
+}> = {
+    '30x20': {
+        nameSize: '9px',
+        subtitleSize: '7px',
+        priceSize: '13px',
+        skuMrpSize: '7px',
+        barcodeTextSize: 7,
+        barcodeHeight: 16,
+        barcodeWidth: 1.2,
+    },
+    '40x30': {
+        nameSize: '12px',
+        subtitleSize: '9px',
+        priceSize: '17px',
+        skuMrpSize: '8px',
+        barcodeTextSize: 9,
+        barcodeHeight: 22,
+        barcodeWidth: 1.5,
+    },
+    '50x30': {
+        nameSize: '13px',
+        subtitleSize: '10px',
+        priceSize: '20px',
+        skuMrpSize: '9px',
+        barcodeTextSize: 9,
+        barcodeHeight: 24,
+        barcodeWidth: 1.8,
+    },
+    '60x40': {
+        nameSize: '15px',
+        subtitleSize: '11px',
+        priceSize: '24px',
+        skuMrpSize: '10px',
+        barcodeTextSize: 10,
+        barcodeHeight: 38,
+        barcodeWidth: 2,
+    },
+    '110x30_2up': {
+        nameSize: '12px',
+        subtitleSize: '9px',
+        priceSize: '18px',
+        skuMrpSize: '8px',
+        barcodeTextSize: 9,
+        barcodeHeight: 22,
+        barcodeWidth: 1.5,
+    },
+};
+
 export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, copies, size, showName, showPrice, showSku, showMRP }: Props) {
 
     useEffect(() => {
+        const f = fontMap[size] || fontMap['40x30'];
         const totalLabels = qty * copies;
         for (let i = 0; i < totalLabels; i++) {
             try {
                 JsBarcode(`#b-node-${i}`, barcode, {
                     format: 'CODE128',
-                    width: size === '30x20' ? 1.5 : 2,
-                    height: size === '30x20' ? 25 : size === '60x40' ? 55 : 38,
+                    width: f.barcodeWidth,
+                    height: f.barcodeHeight,
                     displayValue: true,
-                    fontSize: size === '30x20' ? 9 : 11,
+                    fontSize: f.barcodeTextSize,
                     margin: 0,
                     textMargin: 3
                 });
@@ -37,7 +98,7 @@ export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, co
     const rawItems = Array.from({ length: totalLabels }, (_, i) => i);
     const is2Up = size === '110x30_2up';
 
-    const chunkedItems = [];
+    const chunkedItems: number[][] = [];
     if (is2Up) {
         for (let i = 0; i < rawItems.length; i += 2) {
             chunkedItems.push(rawItems.slice(i, i + 2));
@@ -46,14 +107,15 @@ export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, co
         rawItems.forEach(item => chunkedItems.push([item]));
     }
 
-    const sizeMap: Record<string, { w: string; h: string; pad: string; font: string; innerW?: string }> = {
-        '40x30': { w: '40mm', h: '30mm', pad: '2mm', font: '9px' },
-        '50x30': { w: '50mm', h: '30mm', pad: '2.5mm', font: '10px' },
-        '60x40': { w: '60mm', h: '40mm', pad: '3mm', font: '11px' },
-        '30x20': { w: '30mm', h: '20mm', pad: '1.5mm', font: '8px' },
-        '110x30_2up': { w: '104mm', h: '30mm', pad: '2mm', font: '10px', innerW: '50mm' },
+    const sizeMap: Record<string, { w: string; h: string; pad: string; innerW?: string }> = {
+        '40x30':      { w: '40mm', h: '30mm', pad: '2mm' },
+        '50x30':      { w: '50mm', h: '30mm', pad: '2.5mm' },
+        '60x40':      { w: '60mm', h: '40mm', pad: '3mm' },
+        '30x20':      { w: '30mm', h: '20mm', pad: '1.5mm' },
+        '110x30_2up': { w: '104mm', h: '30mm', pad: '2mm', innerW: '50mm' },
     };
     const currentSize = sizeMap[size] || sizeMap['40x30'];
+    const f = fontMap[size] || fontMap['40x30'];
 
     return (
         <>
@@ -68,7 +130,8 @@ export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, co
                         boxSizing: 'border-box',
                         display: 'flex',
                         flexDirection: is2Up ? 'row' : 'column',
-                        justifyContent: 'center',
+                        // 2up: always align left so a lone last label sits in the left slot, not centred
+                        justifyContent: is2Up ? 'flex-start' : 'center',
                         alignItems: 'center',
                         gap: is2Up ? '6mm' : '0',
                         overflow: 'hidden',
@@ -87,19 +150,42 @@ export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, co
                                 boxSizing: 'border-box',
                                 overflow: 'hidden'
                             }}>
+                                {/* Name line: product name shrinks/truncates, variant name is always shown in full */}
                                 {showName && (
                                     <div style={{
-                                        fontSize: currentSize.font,
-                                        fontWeight: 'bold',
-                                        whiteSpace: 'nowrap',
-                                        textOverflow: 'ellipsis',
-                                        overflow: 'hidden',
+                                        display: 'flex',
+                                        flexDirection: 'row',
+                                        alignItems: 'baseline',
                                         width: '100%',
                                         marginBottom: '2px',
+                                        overflow: 'hidden',
+                                        fontSize: f.nameSize,
+                                        fontWeight: '800',
                                         textTransform: 'uppercase',
-                                        color: '#000'
+                                        color: '#000',
+                                        letterSpacing: '0.01em',
+                                        whiteSpace: 'nowrap',
                                     }}>
-                                        {variant.product.name}
+                                        {/* Product name — shrinks and truncates when long */}
+                                        <span style={{
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                            minWidth: 0,
+                                            flexShrink: 1,
+                                        }}>
+                                            {variant.product.name}
+                                        </span>
+                                        {/* Variant name — never truncated, always fully visible */}
+                                        {variant.variant_name && (
+                                            <span style={{
+                                                flexShrink: 0,
+                                                whiteSpace: 'nowrap',
+                                                paddingLeft: '3px',
+                                            }}>
+                                                - {variant.variant_name}
+                                            </span>
+                                        )}
                                     </div>
                                 )}
 
@@ -108,17 +194,41 @@ export default function BarcodeLabelPrintPreviewPage({ variant, barcode, qty, co
                                 <div style={{
                                     display: 'flex',
                                     justifyContent: 'center',
-                                    alignItems: 'center',
-                                    gap: '8px',
+                                    alignItems: 'baseline',
+                                    gap: '6px',
                                     marginTop: '2px',
-                                    fontSize: size === '30x20' ? '8px' : '10px',
-                                    fontWeight: 'bold',
-                                    color: '#000',
                                     width: '100%'
                                 }}>
-                                    {showPrice && <div>₹{variant.selling_price.toFixed(2)}</div>}
-                                    {showMRP && <div style={{ textDecoration: 'line-through', fontWeight: 'normal', color: '#555' }}>M:₹{variant.mrp.toFixed(2)}</div>}
-                                    {showSku && <div style={{ fontFamily: 'monospace', fontWeight: 'normal' }}>{variant.sku}</div>}
+                                    {showPrice && (
+                                        <div style={{
+                                            fontSize: f.priceSize,
+                                            fontWeight: '800',
+                                            color: '#000',
+                                            letterSpacing: '-0.01em',
+                                        }}>
+                                            ₹{variant.selling_price.toLocaleString('en-IN')}
+                                        </div>
+                                    )}
+                                    {showMRP && (
+                                        <div style={{
+                                            fontSize: f.skuMrpSize,
+                                            fontWeight: '400',
+                                            textDecoration: 'line-through',
+                                            color: '#444',
+                                        }}>
+                                            M:₹{variant.mrp.toFixed(2)}
+                                        </div>
+                                    )}
+                                    {showSku && (
+                                        <div style={{
+                                            fontSize: f.skuMrpSize,
+                                            fontWeight: '400',
+                                            fontFamily: 'monospace',
+                                            color: '#000',
+                                        }}>
+                                            {variant.sku}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}

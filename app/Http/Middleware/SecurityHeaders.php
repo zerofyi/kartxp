@@ -19,7 +19,7 @@ class SecurityHeaders
         'X-Frame-Options'         => 'SAMEORIGIN',
         'X-XSS-Protection'        => '1; mode=block',
         'Referrer-Policy'         => 'strict-origin-when-cross-origin',
-        'Permissions-Policy'      => 'camera=(), microphone=(), geolocation=(self)',
+        'Permissions-Policy'      => 'camera=(self), microphone=(), geolocation=(self)',
         'Content-Security-Policy' => "default-src 'self' http://localhost:5173 http://127.0.0.1:5173 ws://localhost:5173 ws://127.0.0.1:5173; "
             . "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173 http://127.0.0.1:5173; "
             . "style-src 'self' 'unsafe-inline' fonts.googleapis.com fonts.bunny.net http://localhost:5173 http://127.0.0.1:5173; "

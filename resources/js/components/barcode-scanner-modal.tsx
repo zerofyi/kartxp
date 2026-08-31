@@ -15,8 +15,6 @@ const CONTAINER_ID = 'interactive-barcode-reader';
 export default function BarcodeScannerModal({ open, onClose, onScan }: Props) {
     const scannerRef = useRef<Html5Qrcode | null>(null);
     const [cameraError, setCameraError] = useState<string | null>(null);
-
-    // Concurrency lock refs to prevent overlapping transitions
     const isStartingRef = useRef(false);
     const isStoppingRef = useRef(false);
 
@@ -27,7 +25,6 @@ export default function BarcodeScannerModal({ open, onClose, onScan }: Props) {
             if (isStoppingRef.current) return;
             isStoppingRef.current = true;
 
-            // Wait if the scanner is currently in the middle of starting up
             while (isStartingRef.current) {
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
@@ -40,9 +37,8 @@ export default function BarcodeScannerModal({ open, onClose, onScan }: Props) {
                     }
                     scanner.clear();
                 } catch (err: any) {
-                    // Suppress harmless concurrent cleanup noise
                     if (!String(err).includes('already under transition')) {
-                        console.warn('Scanner cleanup warning:', err);
+                        console.warn('Scanner stop warning:', err);
                     }
                 } finally {
                     scannerRef.current = null;
@@ -54,19 +50,12 @@ export default function BarcodeScannerModal({ open, onClose, onScan }: Props) {
         const startScanner = async () => {
             setCameraError(null);
 
-            if (
-                window.location.protocol !== 'https:' &&
-                window.location.hostname !== 'localhost' &&
-                window.location.hostname !== '127.0.0.1'
-            ) {
-                setCameraError('Camera requires a secure HTTPS connection or localhost.');
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                setCameraError('Camera API is not supported on this browser or connection is not secure (HTTPS required).');
                 return;
             }
 
-            // Ensure previous instances are completely stopped before reinitializing
             await stopScanner();
-
-            // Wait for dialog rendering animation in DOM
             await new Promise((resolve) => setTimeout(resolve, 200));
 
             const container = document.getElementById(CONTAINER_ID);
@@ -75,6 +64,16 @@ export default function BarcodeScannerModal({ open, onClose, onScan }: Props) {
             isStartingRef.current = true;
 
             try {
+                // 1. Explicitly request camera permission to trigger system prompt
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                });
+                // Release temporary stream tracks so Html5Qrcode can mount cleanly
+                stream.getTracks().forEach((track) => track.stop());
+
+                if (!isMounted) return;
+
+                // 2. Initialize and start scanner
                 const scanner = new Html5Qrcode(CONTAINER_ID, {
                     formatsToSupport: [
                         Html5QrcodeSupportedFormats.EAN_13,
@@ -102,12 +101,14 @@ export default function BarcodeScannerModal({ open, onClose, onScan }: Props) {
             } catch (err: any) {
                 if (isMounted) {
                     console.error('Camera startup error:', err);
-                    if (String(err).includes('NotAllowedError') || String(err).includes('Permission denied')) {
-                        setCameraError('Camera access blocked. Please check browser settings.');
-                    } else if (String(err).includes('NotReadableError') || String(err).includes('TrackStartError')) {
-                        setCameraError('Camera hardware is currently in use by another tab or app.');
+                    if (String(err).includes('Permissions policy violation') || err?.name === 'SecurityError') {
+                        setCameraError('Camera disabled by server Permissions-Policy. Add camera=(self) to your server headers.');
+                    } else if (err?.name === 'NotAllowedError' || String(err).includes('Permission denied')) {
+                        setCameraError('Camera permission denied. Allow camera in your browser site settings and reload.');
+                    } else if (err?.name === 'NotReadableError' || String(err).includes('TrackStartError')) {
+                        setCameraError('Camera is in use by another app or tab.');
                     } else {
-                        setCameraError('Unable to access device camera.');
+                        setCameraError('Unable to start camera.');
                     }
                 }
             } finally {
@@ -139,7 +140,7 @@ export default function BarcodeScannerModal({ open, onClose, onScan }: Props) {
                 {cameraError ? (
                     <div className="p-4 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 text-center space-y-2">
                         <AlertCircle className="h-6 w-6 text-rose-600 mx-auto" />
-                        <p className="text-xs text-rose-700 font-medium">{cameraError}</p>
+                        <p className="text-xs text-rose-700 font-medium leading-relaxed">{cameraError}</p>
                     </div>
                 ) : (
                     <div className="overflow-hidden rounded-lg border bg-black relative min-h-[260px] flex items-center justify-center">
