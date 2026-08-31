@@ -68,7 +68,7 @@ const mainNavItems: NavItem[] = [
 
 const inventoryNavItems: NavItem[] = [
     {
-        title: 'Stock Levels',
+        title: 'Inventory',
         href: warehouse.inventory.index().url,
         icon: Archive,
     },
@@ -77,10 +77,15 @@ const inventoryNavItems: NavItem[] = [
         href: warehouse.purchases.index().url,
         icon: ShoppingCart,
     },
+    // {
+    //     title: 'Barcodes',
+    //     href: '#',
+    //     //href: warehouse.barcodesV2.index().url,
+    //     icon: Barcode,
+    // },
     {
-        title: 'Barcodes',
-        href: '#',
-        //href: warehouse.barcodesV2.index().url,
+        title: 'Stock Adjustments',
+        href: warehouse.stock.adjust.create().url,
         icon: Barcode,
     },
     {

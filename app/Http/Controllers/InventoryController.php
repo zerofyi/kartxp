@@ -4,14 +4,19 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use App\Models\ProductVariant;
+use App\Models\StockAdjustment;
+use App\Models\StockAdjustmentItem;
 use App\Models\StockBatch;
 use App\Models\StockLedger;
 use App\Models\StockSnapshot;
 use App\Models\Warehouse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -277,59 +282,179 @@ class InventoryController extends Controller
         ]);
     }
 
+
+
+    public function createAdjustment()
+    {
+        return Inertia::render('Warehouse/StockAdjustment/Create');
+    }
+
     /**
-     * Adjust stock quantities under an isolation transaction lock manually.
+     * Fast search / barcode scan lookup endpoint for mobile interface.
+     */
+    public function lookup(Request $request): JsonResponse
+    {
+        $query = trim($request->input('q', ''));
+
+        if (empty($query)) {
+            return response()->json(['data' => []]);
+        }
+
+        $warehouseId = $this->currentWarehouseId();
+
+        $variants = ProductVariant::query()
+            ->with([
+                'product:id,name,category_id',
+                'product.category:id,name',
+                'unit:id,name,symbol',
+                'barcodes:id,product_variant_id,barcode,is_primary',
+                'stockSnapshots' => fn($q) => $q->where('warehouse_id', $warehouseId),
+            ])
+            ->where('status', true)
+            ->where(function ($q) use ($query) {
+                $q->where('sku', 'like', "%{$query}%")
+                ->orWhere('variant_name', 'like', "%{$query}%")
+                ->orWhereHas('product', fn($inner) => $inner->where('name', 'like', "%{$query}%"))
+                ->orWhereHas('barcodes', fn($inner) => $inner->where('barcode', $query));
+            })
+            ->limit(15)
+            ->get()
+            ->map(function ($variant) use ($warehouseId) {
+                $snapshot = $variant->stockSnapshots->first();
+                $available = $snapshot ? (int) $snapshot->available_quantity : 0;
+                $reserved = $snapshot ? (int) $snapshot->reserved_quantity : 0;
+
+                $batches = StockBatch::where('product_variant_id', $variant->id)
+                    ->where('warehouse_id', $warehouseId)
+                    ->where('available_quantity', '>', 0)
+                    ->orderBy('expiry_date', 'asc')
+                    ->get(['id', 'batch_no', 'available_quantity', 'expiry_date']);
+
+                return [
+                    'id'                 => $variant->id,
+                    'product_name'       => $variant->product->name ?? 'Unknown',
+                    'variant_name'       => $variant->variant_name,
+                    'sku'                => $variant->sku,
+                    'category_name'      => $variant->product->category->name ?? 'Unassigned',
+                    'unit_symbol'        => $variant->unit->symbol ?? 'pcs',
+                    'cost_price'         => (float) $variant->cost_price,
+                    'total_available'    => $available,
+                    'total_reserved'     => $reserved,
+                    'primary_barcode'    => $variant->barcodes->firstWhere('is_primary', true)->barcode ?? $variant->barcodes->first()->barcode ?? null,
+                    'batches'            => $batches,
+                ];
+            });
+
+        return response()->json(['data' => $variants]);
+    }
+
+
+    /**
+     * Adjust stock quantities under a pessimistic row lock with complete audit trail.
      */
     public function adjustStock(Request $request): RedirectResponse
     {
+        $warehouseId = $this->currentWarehouseId();
+
         $validated = $request->validate([
-            'product_variant_id' => 'required|exists:product_variants,id',
-            'warehouse_id'       => 'required|exists:warehouses,id',
-            'adjustment_type'    => 'required|in:increase,decrease',
-            'quantity'           => 'required|integer|min:1',
-            'reason'             => 'required|string|max:255',
-            'batch_id'           => 'nullable|exists:stock_batches,id',
+            'product_variant_id' => ['required', 'exists:product_variants,id'],
+            'adjustment_type'    => ['required', 'in:increase,decrease'],
+            'quantity'           => ['required', 'integer', 'min:1'],
+            'reason'             => ['required', 'string', 'max:255'],
+            'batch_id'           => [
+                'required',
+                Rule::exists('stock_batches', 'id')->where(function ($query) use ($request, $warehouseId) {
+                    $query->where('warehouse_id', $warehouseId)
+                        ->where('product_variant_id', $request->input('product_variant_id'));
+                }),
+            ],
+        ], [
+            'batch_id.required' => 'Please select an active stock batch to apply this adjustment.',
         ]);
 
-        DB::transaction(function () use ($validated) {
-            $movementType = $validated['adjustment_type'] === 'increase' ? 'IN' : 'OUT';
-            $qty = $validated['quantity'];
+        DB::transaction(function () use ($validated, $warehouseId) {
+            $isIncrease = $validated['adjustment_type'] === 'increase';
+            $movementType = $isIncrease ? 'IN' : 'OUT';
+            $qty = (int) $validated['quantity'];
 
+            // 1. Lock Batch first
+            $batch = StockBatch::where('id', $validated['batch_id'])
+                ->where('warehouse_id', $warehouseId)
+                ->where('product_variant_id', $validated['product_variant_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // 2. Validate sufficiency on batch
+            if (!$isIncrease && $batch->available_quantity < $qty) {
+                throw ValidationException::withMessages([
+                    'quantity' => "Insufficient batch stock. Current batch available: {$batch->available_quantity} Units.",
+                ]);
+            }
+
+            // 3. Lock StockSnapshot
+            $snapshot = StockSnapshot::where('product_variant_id', $validated['product_variant_id'])
+                ->where('warehouse_id', $warehouseId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$snapshot) {
+                if (!$isIncrease) {
+                    throw ValidationException::withMessages([
+                        'quantity' => 'Cannot decrease stock: No snapshot record found.',
+                    ]);
+                }
+                $snapshot = StockSnapshot::create([
+                    'product_variant_id' => $validated['product_variant_id'],
+                    'warehouse_id'       => $warehouseId,
+                    'available_quantity' => 0,
+                    'reserved_quantity'  => 0,
+                ]);
+            }
+
+            if (!$isIncrease && $snapshot->available_quantity < $qty) {
+                throw ValidationException::withMessages([
+                    'quantity' => "Insufficient warehouse snapshot stock. Current available: {$snapshot->available_quantity} Units.",
+                ]);
+            }
+
+            // 4. Create Header Document
+            $adjustment = StockAdjustment::create([
+                'warehouse_id' => $warehouseId,
+                'reason'       => $validated['reason'],
+                'created_by'   => Auth::id(),
+            ]);
+
+            // 5. Create Line Item Document
+            $adjustmentItem = StockAdjustmentItem::create([
+                'stock_adjustment_id' => $adjustment->id,
+                'product_variant_id'  => $validated['product_variant_id'],
+                'batch_id'            => $batch->id,
+                'quantity'            => $qty,
+                'adjustment_type'     => $validated['adjustment_type'],
+            ]);
+
+            // 6. Record in Ledger
             StockLedger::create([
                 'product_variant_id' => $validated['product_variant_id'],
-                'warehouse_id'       => $validated['warehouse_id'],
-                'batch_id'           => $validated['batch_id'] ?? null,
+                'warehouse_id'       => $warehouseId,
+                'batch_id'           => $batch->id,
                 'movement_type'      => $movementType,
                 'quantity'           => $qty,
-                'source_type'        => self::class,
-                'source_id'          => Auth::id(),
+                'source_type'        => StockAdjustmentItem::class,
+                'source_id'          => $adjustmentItem->id,
                 'remarks'            => $validated['reason'],
             ]);
 
-            $snapshot = StockSnapshot::firstOrCreate(
-                [
-                    'product_variant_id' => $validated['product_variant_id'],
-                    'warehouse_id'       => $validated['warehouse_id'],
-                ],
-                ['available_quantity' => 0, 'reserved_quantity' => 0]
-            );
-
-            if ($movementType === 'IN') {
+            // 7. Update Balances
+            if ($isIncrease) {
                 $snapshot->increment('available_quantity', $qty);
+                $batch->increment('available_quantity', $qty);
             } else {
                 $snapshot->decrement('available_quantity', $qty);
-            }
-
-            if (!empty($validated['batch_id'])) {
-                $batch = StockBatch::findOrFail($validated['batch_id']);
-                if ($movementType === 'IN') {
-                    $batch->increment('available_quantity', $qty);
-                } else {
-                    $batch->decrement('available_quantity', $qty);
-                }
+                $batch->decrement('available_quantity', $qty);
             }
         });
 
-        return back()->with('success', 'Physical stock metrics adjusted and committed cleanly.');
+        return back()->with('success', 'Stock adjustment applied successfully.');
     }
 }

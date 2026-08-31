@@ -52,7 +52,11 @@ Route::middleware(['auth', 'verified', 'check:warehouse'])
     Route::get('api/inventory/low-stock', [InventoryController::class, 'lowStock'])->name('inventory.low-stock');
     Route::get('api/inventory/expiring-batches', [InventoryController::class, 'expiringBatches'])->name('inventory.expiring-batches');
     Route::get('api/inventory/stock-valuation', [InventoryController::class, 'stockValuation'])->name('inventory.stock-valuation');
-    Route::post('inventory/adjust-stock', [InventoryController::class, 'adjustStock'])->name('inventory.adjust-stock');
+
+
+    Route::get('stock/adjust/create', [InventoryController::class, 'createAdjustment'])->name('stock.adjust.create');
+    Route::get('inventory-lookup', [InventoryController::class, 'lookup'])->name('inventory.lookup');
+    Route::post('inventory/adjust', [InventoryController::class, 'adjustStock'])->name('inventory.adjust');
 
     Route::get('barcode/{productVariant}', [InventoryController::class, 'barcode'])->name('inventory.barcode');
     Route::get('label/print/{productVariant}', [InventoryController::class, 'printBarcode'])->name('inventory.barcode.print');

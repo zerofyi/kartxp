@@ -1,25 +1,20 @@
-import { Head, router } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import React, { useState } from 'react';
 import {
     ArrowLeft, Package, TrendingUp, TrendingDown,
-    AlertTriangle, Clock, Calendar, Layers,
-    ChevronRight, ShieldAlert, CircleDot, ReceiptText
+    AlertTriangle, Clock, Layers, ShieldAlert
 } from 'lucide-react';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import {
-    Table, TableBody, TableCell, TableHead,
-    TableHeader, TableRow
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import axios from 'axios';
 
 type Product = {
     id: number;
@@ -61,18 +56,9 @@ type Props = {
     totalReserved: number;
 };
 
-// Days until expiry (negative = already expired)
 function daysUntil(dateStr: string): number {
     const diff = new Date(dateStr).getTime() - Date.now();
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-function ExpiryBadge({ days }: { days: number }) {
-    if (days < 0) return <Badge className="bg-rose-600 text-white text-[10px]">Expired</Badge>;
-    if (days <= 7) return <Badge className="bg-rose-500 text-white text-[10px]">{days}d left</Badge>;
-    if (days <= 30) return <Badge className="bg-amber-500 text-white text-[10px]">{days}d left</Badge>;
-    if (days <= 90) return <Badge className="bg-yellow-400 text-yellow-900 text-[10px]">{days}d left</Badge>;
-    return <Badge variant="outline" className="text-[10px] text-muted-foreground">{new Date(/* filled below */'').toLocaleDateString()}</Badge>;
 }
 
 export default function InventoryDetails({
@@ -91,49 +77,41 @@ export default function InventoryDetails({
     const isLow = !isOut && totalAvailable <= product.reorder_level;
     const stockValue = totalAvailable * product.cost_price;
 
-    // Classify batches by expiry
-    const expiredBatches   = batches.filter(b => b.expiry_date && daysUntil(b.expiry_date) < 0 && b.available_quantity > 0);
-    const criticalBatches  = batches.filter(b => b.expiry_date && daysUntil(b.expiry_date) >= 0 && daysUntil(b.expiry_date) <= 7);
-    const warningBatches   = batches.filter(b => b.expiry_date && daysUntil(b.expiry_date) > 7 && daysUntil(b.expiry_date) <= 30);
+    const expiredBatches  = batches.filter(b => b.expiry_date && daysUntil(b.expiry_date) < 0 && b.available_quantity > 0);
+    const criticalBatches = batches.filter(b => b.expiry_date && daysUntil(b.expiry_date) >= 0 && daysUntil(b.expiry_date) <= 7);
+    const warningBatches  = batches.filter(b => b.expiry_date && daysUntil(b.expiry_date) > 7 && daysUntil(b.expiry_date) <= 30);
 
-    // Adjust stock modal state
+    // Inertia Form Hook
     const [adjustModal, setAdjustModal] = useState(false);
-    const [adjType, setAdjType] = useState<'increase' | 'decrease'>('increase');
-    const [adjQty, setAdjQty] = useState('');
-    const [adjReason, setAdjReason] = useState('');
-    const [adjBatch, setAdjBatch] = useState('');
-    const [adjError, setAdjError] = useState('');
-    const [adjLoading, setAdjLoading] = useState(false);
+    const { data, setData, post, processing, errors, reset, clearErrors } = useForm({
+        product_variant_id: product.id,
+        adjustment_type: 'increase' as 'increase' | 'decrease',
+        quantity: '',
+        reason: '',
+        batch_id: '',
+    });
 
-    const submitAdjustment = async () => {
-        if (!adjQty || parseInt(adjQty) < 1) return setAdjError('Enter a valid quantity.');
-        if (!adjReason.trim()) return setAdjError('Reason is required.');
-        setAdjLoading(true);
-        setAdjError('');
-        try {
-            await axios.post('/warehouse/inventory/adjust', {
-                product_variant_id: product.id,
-                adjustment_type: adjType,
-                quantity: parseInt(adjQty),
-                reason: adjReason,
-                batch_id: adjBatch || null,
-            });
-            setAdjustModal(false);
-            setAdjQty(''); setAdjReason(''); setAdjBatch('');
-            router.reload();
-        } catch (e: any) {
-            setAdjError(e?.response?.data?.message ?? 'Adjustment failed.');
-        } finally {
-            setAdjLoading(false);
-        }
+    const selectedBatch = batches.find(b => b.id.toString() === data.batch_id);
+    const maxAvailableForAdjustment = data.adjustment_type === 'decrease'
+        ? (selectedBatch ? selectedBatch.available_quantity : totalAvailable)
+        : undefined;
+
+    const handleFormSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        post('/warehouse/inventory/adjust', {
+            preserveScroll: true,
+            onSuccess: () => {
+                setAdjustModal(false);
+                reset('quantity', 'reason', 'batch_id');
+            },
+        });
     };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={`Inventory · ${product.sku}`} />
             <div className="p-6 space-y-5">
-
-                {/* ── Header ── */}
+                {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                     <div className="flex items-start gap-3">
                         <Button
@@ -158,13 +136,16 @@ export default function InventoryDetails({
                         size="sm"
                         variant="outline"
                         className="h-9 text-xs w-fit self-start"
-                        onClick={() => setAdjustModal(true)}
+                        onClick={() => {
+                            clearErrors();
+                            setAdjustModal(true);
+                        }}
                     >
                         Adjust Stock
                     </Button>
                 </div>
 
-                {/* ── Expiry Alerts ── */}
+                {/* Expiry Alerts */}
                 {expiredBatches.length > 0 && (
                     <div className="flex items-start gap-3 rounded-lg border border-rose-300 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 px-4 py-3">
                         <ShieldAlert className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
@@ -173,8 +154,7 @@ export default function InventoryDetails({
                                 {expiredBatches.length} expired batch{expiredBatches.length > 1 ? 'es' : ''} with stock remaining
                             </p>
                             <p className="text-xs text-rose-600/80 mt-0.5">
-                                {expiredBatches.map(b => `${b.batch_no} (${b.available_quantity} units)`).join(', ')}
-                                — these should be quarantined immediately.
+                                {expiredBatches.map(b => `${b.batch_no} (${b.available_quantity} units)`).join(', ')} — quarantine immediately.
                             </p>
                         </div>
                     </div>
@@ -208,7 +188,7 @@ export default function InventoryDetails({
                     </div>
                 )}
 
-                {/* ── Summary Metrics ── */}
+                {/* Summary Metrics */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <Card className={`border-l-4 ${isOut ? 'border-l-rose-500' : isLow ? 'border-l-amber-500' : 'border-l-emerald-500'}`}>
                         <CardContent className="pt-4 pb-4">
@@ -248,7 +228,7 @@ export default function InventoryDetails({
                     </Card>
                 </div>
 
-                {/* ── Product Info ── */}
+                {/* Pricing Info */}
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Pricing</CardTitle>
@@ -271,7 +251,7 @@ export default function InventoryDetails({
                     </CardContent>
                 </Card>
 
-                {/* ── Batch Details ── */}
+                {/* Batches Table */}
                 <Card>
                     <CardHeader className="pb-3">
                         <div className="flex items-center justify-between">
@@ -344,7 +324,7 @@ export default function InventoryDetails({
                     </CardContent>
                 </Card>
 
-                {/* ── Stock Movements ── */}
+                {/* Stock Movements */}
                 <Card>
                     <CardHeader className="pb-3">
                         <div className="flex items-center justify-between">
@@ -414,68 +394,92 @@ export default function InventoryDetails({
                 </Card>
             </div>
 
-            {/* ── Adjust Stock Modal ── */}
-            <Dialog open={adjustModal} onOpenChange={open => { setAdjustModal(open); setAdjError(''); }}>
+            {/* Adjust Stock Modal */}
+            <Dialog open={adjustModal} onOpenChange={open => { setAdjustModal(open); clearErrors(); }}>
                 <DialogContent className="max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle className="text-base font-bold">Adjust Stock</DialogTitle>
-                        <DialogDescription className="text-xs">
-                            {product.product_name} · {product.sku}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 pt-1">
-                        <div className="space-y-1">
-                            <Label className="text-xs font-semibold">Adjustment Type</Label>
-                            <Select value={adjType} onValueChange={(v: 'increase' | 'decrease') => setAdjType(v)}>
-                                <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="increase">Increase (Stock In)</SelectItem>
-                                    <SelectItem value="decrease">Decrease (Stock Out)</SelectItem>
-                                </SelectContent>
-                            </Select>
+                    <form onSubmit={handleFormSubmit}>
+                        <DialogHeader>
+                            <DialogTitle className="text-base font-bold">Adjust Stock</DialogTitle>
+                            <DialogDescription className="text-xs">
+                                {product.product_name} · {product.sku}
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-4 pt-3">
+                            <div className="space-y-1">
+                                <Label className="text-xs font-semibold">Adjustment Type</Label>
+                                <Select
+                                    value={data.adjustment_type}
+                                    onValueChange={(v: 'increase' | 'decrease') => setData('adjustment_type', v)}
+                                >
+                                    <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="increase">Increase (Stock In)</SelectItem>
+                                        <SelectItem value="decrease">Decrease (Stock Out)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                {errors.adjustment_type && <p className="text-xs text-rose-600 font-medium">{errors.adjustment_type}</p>}
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label className="text-xs font-semibold">
+                                    Quantity {maxAvailableForAdjustment !== undefined && `(Max: ${maxAvailableForAdjustment})`}
+                                </Label>
+                                <Input
+                                    type="number"
+                                    min="1"
+                                    max={maxAvailableForAdjustment}
+                                    className="h-9 text-xs font-mono"
+                                    placeholder="Enter quantity..."
+                                    value={data.quantity}
+                                    onChange={e => setData('quantity', e.target.value)}
+                                    required
+                                />
+                                {errors.quantity && <p className="text-xs text-rose-600 font-medium">{errors.quantity}</p>}
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label className="text-xs font-semibold">Batch (optional)</Label>
+                                <Select
+                                    value={data.batch_id || 'none'}
+                                    onValueChange={v => setData('batch_id', v === 'none' ? '' : v)}
+                                >
+                                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select batch..." /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">No specific batch</SelectItem>
+                                        {batches.map(b => (
+                                            <SelectItem key={b.id} value={b.id.toString()}>
+                                                {b.batch_no} ({b.available_quantity} available)
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {errors.batch_id && <p className="text-xs text-rose-600 font-medium">{errors.batch_id}</p>}
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label className="text-xs font-semibold">Reason <span className="text-rose-500">*</span></Label>
+                                <Textarea
+                                    className="text-xs resize-none"
+                                    rows={2}
+                                    placeholder="Reason for adjustment..."
+                                    value={data.reason}
+                                    onChange={e => setData('reason', e.target.value)}
+                                    required
+                                />
+                                {errors.reason && <p className="text-xs text-rose-600 font-medium">{errors.reason}</p>}
+                            </div>
                         </div>
-                        <div className="space-y-1">
-                            <Label className="text-xs font-semibold">Quantity</Label>
-                            <Input
-                                type="number"
-                                min="1"
-                                className="h-9 text-xs font-mono"
-                                placeholder="Enter quantity..."
-                                value={adjQty}
-                                onChange={e => setAdjQty(e.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <Label className="text-xs font-semibold">Batch (optional)</Label>
-                            <Select value={adjBatch} onValueChange={setAdjBatch}>
-                                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select batch..." /></SelectTrigger>
-                                <SelectContent>
-                                    {batches.map(b => (
-                                        <SelectItem key={b.id} value={b.id.toString()}>
-                                            {b.batch_no} ({b.available_quantity} available)
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-1">
-                            <Label className="text-xs font-semibold">Reason <span className="text-rose-500">*</span></Label>
-                            <Textarea
-                                className="text-xs resize-none"
-                                rows={2}
-                                placeholder="Reason for adjustment..."
-                                value={adjReason}
-                                onChange={e => setAdjReason(e.target.value)}
-                            />
-                        </div>
-                        {adjError && <p className="text-xs text-rose-600 font-medium">{adjError}</p>}
-                    </div>
-                    <DialogFooter className="gap-2 pt-2">
-                        <Button variant="ghost" size="sm" onClick={() => setAdjustModal(false)}>Cancel</Button>
-                        <Button size="sm" onClick={submitAdjustment} disabled={adjLoading}>
-                            {adjLoading ? 'Saving...' : 'Confirm Adjustment'}
-                        </Button>
-                    </DialogFooter>
+
+                        <DialogFooter className="gap-2 pt-4">
+                            <Button type="button" variant="ghost" size="sm" onClick={() => setAdjustModal(false)}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" size="sm" disabled={processing}>
+                                {processing ? 'Saving...' : 'Confirm Adjustment'}
+                            </Button>
+                        </DialogFooter>
+                    </form>
                 </DialogContent>
             </Dialog>
         </AppLayout>
