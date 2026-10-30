@@ -70,6 +70,11 @@ class ProductVariant extends Model
         return $this->hasMany(StockSnapshot::class);
     }
 
+    public function stockBatches(): HasMany
+    {
+        return $this->hasMany(StockBatch::class);
+    }
+
     public function barcodes(): HasMany
     {
         return $this->hasMany(Barcode::class);

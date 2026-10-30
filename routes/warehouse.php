@@ -15,6 +15,7 @@ use App\Http\Controllers\Warehouse\CustomerController as WHCustomerController;
 use App\Http\Controllers\Warehouse\StaffController;
 use App\Http\Controllers\Warehouse\AccountingController;
 use App\Http\Controllers\Warehouse\SettingsController as WHSettingsController;
+use App\Http\Controllers\Warehouse\DataResetController;
 use App\Http\Controllers\Warehouse\BarcodeController as WHBarcodeController;
 use App\Http\Controllers\Warehouse\AnalyticsEngineController;
 use App\Http\Controllers\Warehouse\DashboardController;
@@ -46,6 +47,7 @@ Route::middleware(['auth', 'verified', 'check:warehouse'])
     Route::post('purchases/{purchase}/confirm', [PurchaseController::class, 'confirm'])->name('purchases.confirm');
 
     Route::get('inventory', [InventoryController::class, 'index'])->name('inventory.index');
+    Route::get('inventory/print', [InventoryController::class, 'printStock'])->name('inventory.print');
     Route::post('inventory/barcode', [BarcodeController::class, 'store'])->name('barcode.store');
     Route::post('inventory/barcode/suggest', [BarcodeController::class, 'suggest'])->name('barcode.suggest');
     Route::get('inventory/{productVariant}', [InventoryController::class, 'show'])->name('inventory.show');
@@ -143,6 +145,8 @@ Route::middleware(['auth', 'verified', 'check:warehouse'])
         Route::post('/shipping-zones', [WHSettingsController::class, 'storeShippingZone'])->name('shipping-zones.store');
         Route::put('/shipping-zones/{zone}', [WHSettingsController::class, 'updateShippingZone'])->name('shipping-zones.update');
         Route::delete('/shipping-zones/{zone}', [WHSettingsController::class, 'deleteShippingZone'])->name('shipping-zones.destroy');
+        Route::get('/data-reset', [DataResetController::class, 'index'])->name('data-reset');
+        Route::post('/data-reset', [DataResetController::class, 'execute'])->name('data-reset.execute');
     });
 
     // Enhanced Barcodes

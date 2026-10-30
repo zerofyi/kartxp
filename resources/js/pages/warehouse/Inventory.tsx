@@ -2,7 +2,7 @@ import { Head, router } from '@inertiajs/react';
 import React, { useState, useRef } from 'react';
 import {
     Search, Download, Package, TrendingUp, Eye,
-    ArrowUpDown, Barcode, X, AlertTriangle, CircleDot
+    ArrowUpDown, Barcode, X, AlertTriangle, CircleDot, Printer
 } from 'lucide-react';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
@@ -104,9 +104,14 @@ export default function InventoryIndexPage({
                             Stock levels, reorder alerts, and barcode management
                         </p>
                     </div>
-                    <Button variant="outline" size="sm" className="h-9 text-xs w-fit">
-                        <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
-                    </Button>
+                    <div className="flex gap-2 w-fit">
+                        <Button variant="outline" size="sm" className="h-9 text-xs w-fit" onClick={() => router.visit('/warehouse/inventory/print')}>
+                            <Printer className="mr-1.5 h-3.5 w-3.5" /> Print Stock
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-9 text-xs w-fit">
+                            <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+                        </Button>
+                    </div>
                 </div>
 
                 {/* Metric Cards */}

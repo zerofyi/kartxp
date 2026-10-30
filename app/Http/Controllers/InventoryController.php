@@ -149,6 +149,90 @@ class InventoryController extends Controller
     }
 
     /**
+     * Printable A4 stock report for the single active warehouse node context.
+     *
+     * Filters: all | in_stock | out_of_stock (same snapshot logic as index()).
+     * Exactly six columns on paper: #, Details, Qty, Purchase Rate,
+     * Wholesale Rate, Retail Rate. Wholesale rate is the variant's
+     * min_selling_price — the price the POS charges for wholesale sales.
+     */
+    public function printStock(Request $request): Response
+    {
+        $warehouseId = $this->currentWarehouseId();
+
+        $filter = $request->input('stock', 'all');
+        if (!in_array($filter, ['all', 'in_stock', 'out_of_stock'], true)) {
+            $filter = 'all';
+        }
+
+        $query = ProductVariant::query()
+            ->with([
+                'product:id,name',
+                'stockSnapshots' => fn($q) => $q->where('warehouse_id', $warehouseId),
+                'stockBatches' => fn($q) => $q->where('warehouse_id', $warehouseId)
+                    ->with('purchaseItem.purchase:id,purchase_date'),
+            ])
+            ->where('status', true);
+
+        if ($filter === 'in_stock') {
+            $query->whereHas('stockSnapshots', fn($q) => $q->where('warehouse_id', $warehouseId)->where('available_quantity', '>', 0));
+        } elseif ($filter === 'out_of_stock') {
+            $query->whereDoesntHave('stockSnapshots', fn($q) => $q->where('warehouse_id', $warehouseId)->where('available_quantity', '>', 0));
+        }
+
+        $query->join('products', 'product_variants.product_id', '=', 'products.id')
+            ->orderBy('products.name', 'asc')
+            ->orderBy('product_variants.variant_name', 'asc')
+            ->select('product_variants.*');
+
+        $rows = $query->get()->map(function ($variant) {
+            $snapshot = $variant->stockSnapshots->first();
+            $batches = $variant->stockBatches;
+
+            // Batches only exist for confirmed purchases, so the latest batch
+            // purchase date is the latest confirmed purchase date.
+            $lastPurchaseDate = $batches
+                ->map(fn($b) => $b->purchaseItem?->purchase?->purchase_date)
+                ->filter()
+                ->max();
+
+            return [
+                'id'                 => $variant->id,
+                'name'               => $variant->product->name ?? 'Deleted Product',
+                'variant_name'       => $variant->variant_name,
+                'total_batches'      => $batches->count(),
+                'available_batches'  => $batches->where('available_quantity', '>', 0)->count(),
+                'last_purchase_date' => $lastPurchaseDate ? $lastPurchaseDate->format('Y-m-d') : null,
+                'available_quantity' => (int) ($snapshot->available_quantity ?? 0),
+                'purchase_rate'      => (float) $variant->cost_price,
+                'wholesale_rate'     => (float) $variant->min_selling_price,
+                'retail_rate'        => (float) $variant->selling_price,
+            ];
+        });
+
+        // ── Filter tab counts — always computed across ALL active variants ──
+
+        $activeVariantIds = ProductVariant::where('status', true)->pluck('id');
+
+        $inStockIds = StockSnapshot::where('warehouse_id', $warehouseId)
+            ->whereIn('product_variant_id', $activeVariantIds)
+            ->where('available_quantity', '>', 0)
+            ->pluck('product_variant_id');
+
+        return Inertia::render('Warehouse/StockPrint', [
+            'rows'          => $rows,
+            'warehouseName' => Auth::user()->ownedWarehouse()->value('warehouses.name') ?? 'KartXP',
+            'filter'        => $filter,
+            'counts'        => [
+                'all'          => $activeVariantIds->count(),
+                'in_stock'     => $inStockIds->unique()->count(),
+                'out_of_stock' => $activeVariantIds->diff($inStockIds)->count(),
+            ],
+            'printedAt'     => now()->format('d M Y, h:i A'),
+        ]);
+    }
+
+    /**
      * Display inventory details for a specific product variant within the current active warehouse.
      */
     public function show(ProductVariant $productVariant): Response
